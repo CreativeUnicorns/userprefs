@@ -2,6 +2,7 @@
 .local
 code.sh
 code.md
+*.db
 
 # Created by https://www.toptal.com/developers/gitignore/api/go,godot,goland,visualstudiocode,linux,windows,macos,ssh,gpg,compressed,dotenv,images
 # Edit at https://www.toptal.com/developers/gitignore?templates=go,godot,goland,visualstudiocode,linux,windows,macos,ssh,gpg,compressed,dotenv,images
@@ -267,7 +268,8 @@ secring.*
 .LSOverride
 
 # Icon must end with two \r
-Icon
+Icon
+
 
 # Thumbnails
 ._*
