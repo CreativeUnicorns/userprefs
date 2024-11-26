@@ -1,0 +1,53 @@
+project_name: userprefs
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - skip: true # Library-only project, no binaries to release
+
+archives:
+  - format: tar.gz
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end }}
+    format_overrides:
+      - goos: windows
+        format: zip
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^ci:'
+      - '^chore:'
+      - Merge pull request
+      - Merge branch
+      - go mod tidy
+
+checksum:
+  name_template: 'checksums.txt'
+
+release:
+  github:
+    owner: CreativeUnicorns
+    name: userprefs
+  draft: false
+  prerelease: auto
+  mode: append
+  header: |
+    ## UserPrefs {{ .Tag }} ({{ .Date }})
+    
+    For more information, see the [documentation](https://pkg.go.dev/github.com/CreativeUnicorns/userprefs).
+  footer: |
+    ## Thanks!
+    
+    These releases are made possible by our contributors.
+  name_template: "{{ .Tag }}"
