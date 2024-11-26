@@ -23,10 +23,10 @@ coverage: ## Run tests with coverage
 	go tool cover -html=coverage.txt
 
 lint: ## Run linters
-	golangci-lint run
+	golangci-lint run 2>&1
 
 security: ## Run security scan
-	gosec -quiet ./...
+	gosec -quiet ./... 2>&1
 
 # Combined quality checks
 check: lint security test ## Run all quality checks (lint, security, test)

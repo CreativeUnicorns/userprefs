@@ -1,7 +1,7 @@
 linters:
   enable:
+    - revive # Replacing deprecated golint
     - gofmt
-    - golint
     - govet
     - errcheck
     - staticcheck
@@ -11,6 +11,7 @@ linters:
     - misspell
     - goimports
     - prealloc
+    - gosec
 
 linters-settings:
   goimports:
