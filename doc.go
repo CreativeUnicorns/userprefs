@@ -1,4 +1,3 @@
-// doc.go
 // Package userprefs provides a flexible, concurrent-safe user preferences management system.
 //
 // It supports multiple storage backends (PostgreSQL, SQLite), optional caching (Redis, in-memory),

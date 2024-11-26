@@ -1,4 +1,4 @@
-// cache/memory.go
+// Package cache provides in-memory caching implementations.
 package cache
 
 import (
@@ -8,16 +8,20 @@ import (
 	"time"
 )
 
+// item represents a single cache item with a value and an expiration time.
 type item struct {
 	value      interface{}
 	expiration time.Time
 }
 
+// MemoryCache implements the Cache interface using an in-memory store.
 type MemoryCache struct {
 	mu    sync.RWMutex
 	items map[string]item
 }
 
+// NewMemoryCache initializes a new MemoryCache instance.
+// It starts a garbage collection goroutine to clean expired items.
 func NewMemoryCache() *MemoryCache {
 	cache := &MemoryCache{
 		items: make(map[string]item),
@@ -26,23 +30,27 @@ func NewMemoryCache() *MemoryCache {
 	return cache
 }
 
-func (c *MemoryCache) Get(ctx context.Context, key string) (interface{}, error) {
+// Get retrieves a value from the memory cache by key.
+// It returns an error if the key does not exist or has expired.
+func (c *MemoryCache) Get(_ context.Context, key string) (interface{}, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	item, exists := c.items[key]
+	it, exists := c.items[key]
 	if !exists {
 		return nil, fmt.Errorf("key not found")
 	}
 
-	if !item.expiration.IsZero() && time.Now().After(item.expiration) {
+	if !it.expiration.IsZero() && time.Now().After(it.expiration) {
 		return nil, fmt.Errorf("key expired")
 	}
 
-	return item.value, nil
+	return it.value, nil
 }
 
-func (c *MemoryCache) Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error {
+// Set stores a value in the memory cache with an optional TTL.
+// If TTL is greater than zero, the key will expire after the duration.
+func (c *MemoryCache) Set(_ context.Context, key string, value interface{}, ttl time.Duration) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -59,7 +67,8 @@ func (c *MemoryCache) Set(ctx context.Context, key string, value interface{}, tt
 	return nil
 }
 
-func (c *MemoryCache) Delete(ctx context.Context, key string) error {
+// Delete removes a key from the memory cache.
+func (c *MemoryCache) Delete(_ context.Context, key string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -67,6 +76,7 @@ func (c *MemoryCache) Delete(ctx context.Context, key string) error {
 	return nil
 }
 
+// Close clears all items from the memory cache.
 func (c *MemoryCache) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -75,14 +85,15 @@ func (c *MemoryCache) Close() error {
 	return nil
 }
 
+// gc runs a garbage collection process that periodically removes expired items.
 func (c *MemoryCache) gc() {
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 
 	for range ticker.C {
 		c.mu.Lock()
-		for key, item := range c.items {
-			if !item.expiration.IsZero() && time.Now().After(item.expiration) {
+		for key, it := range c.items {
+			if !it.expiration.IsZero() && time.Now().After(it.expiration) {
 				delete(c.items, key)
 			}
 		}

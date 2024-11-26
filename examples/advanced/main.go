@@ -31,7 +31,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to initialize storage: %v", err)
 	}
-	defer store.Close()
+	defer func() {
+		if err := store.Close(); err != nil {
+			log.Printf("Failed to close storage: %v", err)
+		}
+	}()
 
 	// Initialize Redis cache
 	redisCache, err := cache.NewRedisCache("localhost:6379", "", 0)
@@ -41,7 +45,9 @@ func main() {
 	}
 	defer func() {
 		if redisCache != nil {
-			redisCache.Close()
+			if err := redisCache.Close(); err != nil {
+				log.Printf("Failed to close Redis cache: %v", err)
+			}
 		}
 	}()
 

@@ -1,4 +1,4 @@
-// storage/sqlite.go
+// Package storage provides a SQLite-based implementation of the Storage interface.
 package storage
 
 import (
@@ -7,8 +7,9 @@ import (
 	"encoding/json"
 	"fmt"
 
+	_ "github.com/mattn/go-sqlite3" // SQLite driver
+
 	"github.com/CreativeUnicorns/userprefs"
-	_ "github.com/mattn/go-sqlite3"
 )
 
 const (
@@ -59,10 +60,13 @@ const (
 	`
 )
 
+// SQLiteStorage implements the Storage interface using SQLite.
 type SQLiteStorage struct {
 	db *sql.DB
 }
 
+// NewSQLiteStorage initializes a new SQLiteStorage instance.
+// It connects to the SQLite database at the specified path and runs migrations.
 func NewSQLiteStorage(dbPath string) (*SQLiteStorage, error) {
 	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
@@ -81,11 +85,14 @@ func NewSQLiteStorage(dbPath string) (*SQLiteStorage, error) {
 	return storage, nil
 }
 
+// migrate runs the necessary database migrations.
 func (s *SQLiteStorage) migrate() error {
 	_, err := s.db.Exec(sqliteCreateTableSQL)
 	return err
 }
 
+// Get retrieves a preference by user ID and key.
+// It returns ErrNotFound if the preference does not exist.
 func (s *SQLiteStorage) Get(ctx context.Context, userID, key string) (*userprefs.Preference, error) {
 	var pref userprefs.Preference
 	var valueJSON string
@@ -113,6 +120,8 @@ func (s *SQLiteStorage) Get(ctx context.Context, userID, key string) (*userprefs
 	return &pref, nil
 }
 
+// Set stores or updates a preference.
+// It marshals the value to JSON before storing.
 func (s *SQLiteStorage) Set(ctx context.Context, pref *userprefs.Preference) error {
 	valueJSON, err := json.Marshal(pref.Value)
 	if err != nil {
@@ -137,26 +146,40 @@ func (s *SQLiteStorage) Set(ctx context.Context, pref *userprefs.Preference) err
 	return nil
 }
 
+// GetByCategory retrieves all preferences for a user within a specific category.
 func (s *SQLiteStorage) GetByCategory(ctx context.Context, userID, category string) (map[string]*userprefs.Preference, error) {
 	rows, err := s.db.QueryContext(ctx, sqliteSelectByCategorySQL, userID, category)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query preferences: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if cerr := rows.Close(); cerr != nil {
+			// Log the error or handle it as needed
+			fmt.Printf("Error closing rows: %v\n", cerr)
+		}
+	}()
 
 	return s.scanPreferences(rows)
 }
 
+// GetAll retrieves all preferences for a user.
 func (s *SQLiteStorage) GetAll(ctx context.Context, userID string) (map[string]*userprefs.Preference, error) {
 	rows, err := s.db.QueryContext(ctx, sqliteSelectAllSQL, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query preferences: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if cerr := rows.Close(); cerr != nil {
+			// Log the error or handle it as needed
+			fmt.Printf("Error closing rows: %v\n", cerr)
+		}
+	}()
 
 	return s.scanPreferences(rows)
 }
 
+// Delete removes a preference by user ID and key.
+// It returns ErrNotFound if the preference does not exist.
 func (s *SQLiteStorage) Delete(ctx context.Context, userID, key string) error {
 	result, err := s.db.ExecContext(ctx, sqliteDeleteSQL, userID, key)
 	if err != nil {
@@ -175,10 +198,12 @@ func (s *SQLiteStorage) Delete(ctx context.Context, userID, key string) error {
 	return nil
 }
 
+// Close closes the SQLite database connection.
 func (s *SQLiteStorage) Close() error {
 	return s.db.Close()
 }
 
+// scanPreferences scans rows and constructs a map of preferences.
 func (s *SQLiteStorage) scanPreferences(rows *sql.Rows) (map[string]*userprefs.Preference, error) {
 	prefs := make(map[string]*userprefs.Preference)
 

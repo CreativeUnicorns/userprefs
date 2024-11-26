@@ -1,4 +1,4 @@
-// validation.go
+// Package userprefs provides validation functions for user preferences.
 package userprefs
 
 import (
@@ -6,6 +6,7 @@ import (
 	"fmt"
 )
 
+// validTypes maps valid preference types to a boolean for quick lookup.
 var validTypes = map[string]bool{
 	"string":  true,
 	"boolean": true,
@@ -14,10 +15,12 @@ var validTypes = map[string]bool{
 	"enum":    true,
 }
 
+// isValidType checks if the provided type is valid.
 func isValidType(t string) bool {
 	return validTypes[t]
 }
 
+// validateValue ensures that the value conforms to the preference definition.
 func validateValue(value interface{}, def PreferenceDefinition) error {
 	switch def.Type {
 	case "string":

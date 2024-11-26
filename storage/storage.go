@@ -1,4 +1,4 @@
-// storage/storage.go
+// Package storage defines the Storage interface for user preferences.
 package storage
 
 import (
@@ -7,6 +7,7 @@ import (
 	"github.com/CreativeUnicorns/userprefs"
 )
 
+// Storage defines the methods required for a storage backend.
 type Storage interface {
 	Get(ctx context.Context, userID, key string) (*userprefs.Preference, error)
 	Set(ctx context.Context, pref *userprefs.Preference) error

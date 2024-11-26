@@ -1,4 +1,4 @@
-// storage/postgres.go
+// Package storage provides a PostgreSQL-based implementation of the Storage interface.
 package storage
 
 import (
@@ -7,8 +7,9 @@ import (
 	"encoding/json"
 	"fmt"
 
+	_ "github.com/lib/pq" // PostgreSQL driver
+
 	"github.com/CreativeUnicorns/userprefs"
-	_ "github.com/lib/pq"
 )
 
 const (
@@ -59,10 +60,13 @@ const (
 	`
 )
 
+// PostgresStorage implements the Storage interface using PostgreSQL.
 type PostgresStorage struct {
 	db *sql.DB
 }
 
+// NewPostgresStorage initializes a new PostgresStorage instance.
+// It connects to the PostgreSQL database using the provided connection string and runs migrations.
 func NewPostgresStorage(connString string) (*PostgresStorage, error) {
 	db, err := sql.Open("postgres", connString)
 	if err != nil {
@@ -81,11 +85,14 @@ func NewPostgresStorage(connString string) (*PostgresStorage, error) {
 	return storage, nil
 }
 
+// migrate runs the necessary database migrations.
 func (s *PostgresStorage) migrate() error {
 	_, err := s.db.Exec(createTableSQL)
 	return err
 }
 
+// Get retrieves a preference by user ID and key.
+// It returns ErrNotFound if the preference does not exist.
 func (s *PostgresStorage) Get(ctx context.Context, userID, key string) (*userprefs.Preference, error) {
 	var pref userprefs.Preference
 	var valueJSON []byte
@@ -113,6 +120,8 @@ func (s *PostgresStorage) Get(ctx context.Context, userID, key string) (*userpre
 	return &pref, nil
 }
 
+// Set stores or updates a preference.
+// It marshals the value to JSON before storing.
 func (s *PostgresStorage) Set(ctx context.Context, pref *userprefs.Preference) error {
 	valueJSON, err := json.Marshal(pref.Value)
 	if err != nil {
@@ -126,6 +135,8 @@ func (s *PostgresStorage) Set(ctx context.Context, pref *userprefs.Preference) e
 		pref.Type,
 		pref.Category,
 		pref.UpdatedAt,
+		pref.Value,
+		pref.UpdatedAt,
 	)
 
 	if err != nil {
@@ -135,26 +146,40 @@ func (s *PostgresStorage) Set(ctx context.Context, pref *userprefs.Preference) e
 	return nil
 }
 
+// GetByCategory retrieves all preferences for a user within a specific category.
 func (s *PostgresStorage) GetByCategory(ctx context.Context, userID, category string) (map[string]*userprefs.Preference, error) {
 	rows, err := s.db.QueryContext(ctx, selectByCategorySQL, userID, category)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query preferences: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if cerr := rows.Close(); cerr != nil {
+			// Log the error or handle it as needed
+			fmt.Printf("Error closing rows: %v\n", cerr)
+		}
+	}()
 
 	return s.scanPreferences(rows)
 }
 
+// GetAll retrieves all preferences for a user.
 func (s *PostgresStorage) GetAll(ctx context.Context, userID string) (map[string]*userprefs.Preference, error) {
 	rows, err := s.db.QueryContext(ctx, selectAllSQL, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query preferences: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if cerr := rows.Close(); cerr != nil {
+			// Log the error or handle it as needed
+			fmt.Printf("Error closing rows: %v\n", cerr)
+		}
+	}()
 
 	return s.scanPreferences(rows)
 }
 
+// Delete removes a preference by user ID and key.
+// It returns ErrNotFound if the preference does not exist.
 func (s *PostgresStorage) Delete(ctx context.Context, userID, key string) error {
 	result, err := s.db.ExecContext(ctx, deleteSQL, userID, key)
 	if err != nil {
@@ -173,10 +198,12 @@ func (s *PostgresStorage) Delete(ctx context.Context, userID, key string) error 
 	return nil
 }
 
+// Close closes the PostgreSQL database connection.
 func (s *PostgresStorage) Close() error {
 	return s.db.Close()
 }
 
+// scanPreferences scans rows and constructs a map of preferences.
 func (s *PostgresStorage) scanPreferences(rows *sql.Rows) (map[string]*userprefs.Preference, error) {
 	prefs := make(map[string]*userprefs.Preference)
 
