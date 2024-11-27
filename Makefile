@@ -3,7 +3,7 @@ VERSION := $(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
 # Get the next version by incrementing the patch number
 NEXT_VERSION := $(shell echo $(VERSION) | awk -F. '{$$NF = $$NF + 1;} 1' | sed 's/ /./g')
 
-.PHONY: help test lint coverage clean build examples security
+.PHONY: help test lint coverage clean build examples security check release-major release-minor release-patch release-check release-local ci-release dev-deps uninstall-deps all
 
 # Help target that lists all available targets with descriptions
 help: ## Show this help message
@@ -48,7 +48,7 @@ release-major: ## Create a new major release (v1.0.0 -> v2.0.0)
 	git tag -a $(NEW_VERSION) -m "Release $(NEW_VERSION)"
 	git push origin $(NEW_VERSION)
 
-## Create a new minor release (v1.0.0 -> v1.1.0)
+release-minor: ## Create a new minor release (v1.0.0 -> v1.1.0)
 	$(eval NEW_VERSION := $(shell echo $(VERSION) | awk -F. '{$$2 = $$2 + 1; $$3 = 0;} 1' | sed 's/ /./g'))
 	@echo "Creating minor release $(NEW_VERSION)"
 	git tag -a $(NEW_VERSION) -m "Release $(NEW_VERSION)"
