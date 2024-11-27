@@ -3,6 +3,8 @@
 code.sh
 code.md
 *.db
+coverage.*
+/coverage/
 
 # Created by https://www.toptal.com/developers/gitignore/api/go,godot,goland,visualstudiocode,linux,windows,macos,ssh,gpg,compressed,dotenv,images
 # Edit at https://www.toptal.com/developers/gitignore?templates=go,godot,goland,visualstudiocode,linux,windows,macos,ssh,gpg,compressed,dotenv,images

@@ -10,9 +10,17 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// RedisClient defines the methods used from redis.Client
+type RedisClient interface {
+	Get(ctx context.Context, key string) *redis.StringCmd
+	Set(ctx context.Context, key string, value interface{}, expiration time.Duration) *redis.StatusCmd
+	Del(ctx context.Context, keys ...string) *redis.IntCmd
+	Close() error
+}
+
 // RedisCache implements the Cache interface using Redis.
 type RedisCache struct {
-	client *redis.Client
+	client RedisClient
 }
 
 // NewRedisCache initializes a new RedisCache instance.
@@ -41,7 +49,7 @@ func NewRedisCache(addr string, password string, db int) (*RedisCache, error) {
 func (c *RedisCache) Get(ctx context.Context, key string) (interface{}, error) {
 	data, err := c.client.Get(ctx, key).Bytes()
 	if err == redis.Nil {
-		return nil, fmt.Errorf("key not found")
+		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get from redis: %w", err)

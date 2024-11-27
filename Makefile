@@ -23,7 +23,7 @@ coverage: ## Run tests with coverage
 	go tool cover -html=coverage.txt
 
 lint: ## Run linters
-	golangci-lint run 2>&1
+	golangci-lint run  --exclude-dirs examples 2>&1
 
 security: ## Run security scan
 	gosec -quiet ./... 2>&1

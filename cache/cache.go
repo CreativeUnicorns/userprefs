@@ -2,6 +2,7 @@ package cache
 
 import (
 	"context"
+	"errors"
 	"time"
 )
 
@@ -12,3 +13,10 @@ type Cache interface {
 	Delete(ctx context.Context, key string) error
 	Close() error
 }
+
+// Define cache-specific errors
+var (
+	ErrNotFound     = errors.New("key not found")
+	ErrKeyExpired   = errors.New("key expired")
+	ErrCacheFailure = errors.New("cache failure")
+)
