@@ -46,6 +46,10 @@ func TestSQLiteStorage(t *testing.T) {
 		},
 	}
 
+	_ = def.Key
+	_ = def.DefaultValue
+	_ = def.AllowedValues
+
 	// Attempt to get undefined preference (should return ErrNotFound)
 	_, err = storage.Get(ctx, userID, key)
 	if err != userprefs.ErrNotFound {

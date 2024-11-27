@@ -35,6 +35,8 @@ clean: ## Clean build artifacts
 	go clean
 	rm -f coverage.txt
 	rm -f userprefs
+	echo rm -f preferences.db
+	echo rm -f sqlite-advanced.db
 
 examples: ## Build example applications
 	go build -v ./examples/...
@@ -46,7 +48,7 @@ release-major: ## Create a new major release (v1.0.0 -> v2.0.0)
 	git tag -a $(NEW_VERSION) -m "Release $(NEW_VERSION)"
 	git push origin $(NEW_VERSION)
 
-release-minor: ## Create a new minor release (v1.0.0 -> v1.1.0)
+## Create a new minor release (v1.0.0 -> v1.1.0)
 	$(eval NEW_VERSION := $(shell echo $(VERSION) | awk -F. '{$$2 = $$2 + 1; $$3 = 0;} 1' | sed 's/ /./g'))
 	@echo "Creating minor release $(NEW_VERSION)"
 	git tag -a $(NEW_VERSION) -m "Release $(NEW_VERSION)"
