@@ -15,6 +15,8 @@
 - Default values support
 - Context-aware operations
 - Discord bot framework agnostic
+- Built and tested with Go 1.24
+- Integrated structured logging using Go's standard `slog` for enhanced observability.
 
 ## Installation
 
@@ -29,22 +31,31 @@ package main
 
 import (
     "context"
+    "errors" // Added for errors.Is
+    "fmt"    // Added for Printf
+    "log"    // Added for logging examples
     "github.com/CreativeUnicorns/userprefs"
     "github.com/CreativeUnicorns/userprefs/storage"
 )
 
 func main() {
     // Initialize storage
-    store, _ := storage.NewSQLiteStorage("prefs.db")
+    store, err := storage.NewSQLiteStorage("prefs.db")
+    if err != nil {
+        log.Fatalf("Failed to initialize SQLite storage: %v", err)
+    }
     defer store.Close()
 
     // Create manager
+    // You can also pass a custom logger implementing userprefs.Logger, 
+    // by default it uses a standard slog.Logger.
     mgr := userprefs.New(
         userprefs.WithStorage(store),
+        // userprefs.WithLogger(yourCustomSlogCompatibleLogger),
     )
 
     // Define preferences
-    mgr.DefinePreference(userprefs.PreferenceDefinition{
+    err = mgr.DefinePreference(userprefs.PreferenceDefinition{
         Key:          "theme",
         Type:         "enum",
         Category:     "appearance",
@@ -53,14 +64,37 @@ func main() {
             "light", "dark", "system",
         },
     })
+    if err != nil {
+        log.Printf("Warning: Failed to define preference 'theme': %v", err) // Or handle more gracefully
+    }
 
     // Set preference
     ctx := context.Background()
-    mgr.Set(ctx, "user123", "theme", "light")
+    err = mgr.Set(ctx, "user123", "theme", "light")
+    if err != nil {
+        log.Printf("Failed to set preference 'theme' for user 'user123': %v", err)
+        // Handle error, e.g., retry or inform user
+    }
 
     // Get preference
-    pref, _ := mgr.Get(ctx, "user123", "theme")
+    pref, err := mgr.Get(ctx, "user123", "theme")
+    if err != nil {
+        if errors.Is(err, userprefs.ErrNotFound) {
+            log.Printf("Preference 'theme' not found for user 'user123'. Using default: %v", pref.DefaultValue)
+            // The 'pref' variable will contain the default value if one was defined
+        } else {
+            log.Printf("Failed to get preference 'theme' for user 'user123': %v", err)
+            // Handle other errors
+            return
+        }
+    }
     fmt.Printf("Theme: %v\n", pref.Value)
+
+    // Example of getting all preferences for a user (error handling omitted for brevity here, but should be done)
+    // allPrefs, _ := mgr.GetAll(ctx, "user123")
+    // for key, pVal := range allPrefs {
+    // 	fmt.Printf("User123 - Key: %s, Value: %v\n", key, pVal.Value)
+    // }
 }
 ```
 
@@ -153,7 +187,7 @@ See the [examples](./examples) directory for complete Discord bot implementation
 1. Define preferences at startup
 2. Use categories to organize preferences
 3. Always provide default values
-4. Handle errors appropriately
+4. Handle errors appropriately, checking for specific errors like `userprefs.ErrNotFound` and `userprefs.ErrSerialization` to build robust applications.
 5. Use context for timeout control
 6. Close storage/cache connections on shutdown
 

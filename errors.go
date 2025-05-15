@@ -26,3 +26,12 @@ var ErrStorageUnavailable = errors.New("storage backend unavailable")
 
 // ErrCacheUnavailable indicates that the cache backend is unavailable.
 var ErrCacheUnavailable = errors.New("cache backend unavailable")
+
+// ErrAlreadyExists indicates that an attempt was made to create a resource that already exists.
+var ErrAlreadyExists = errors.New("resource already exists")
+
+// ErrSerialization indicates an error during data serialization or deserialization (e.g., JSON).
+var ErrSerialization = errors.New("data serialization error")
+
+// ErrInternal indicates an unexpected internal server error.
+var ErrInternal = errors.New("internal server error")

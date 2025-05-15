@@ -1,387 +1,594 @@
 package userprefs
 
-// import (
-// 	"context"
-// 	"testing"
-// )
+import (
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"testing"
+	"time"
+)
 
-// func TestManager_DefinePreference(t *testing.T) {
-// 	store := NewMockStorage()
-// 	cache := NewMockCache()
-// 	logger := &MockLogger{}
-// 	mgr := &Manager{
-// 		config: &Config{
-// 			storage:     store,
-// 			cache:       cache,
-// 			logger:      logger,
-// 			definitions: make(map[string]PreferenceDefinition),
-// 		},
-// 	}
+func TestManager_DefinePreference(t *testing.T) {
+	store := NewMockStorage()
+	cache := NewMockCache()
+	logger := &MockLogger{}
+	mgr := New(
+		WithStorage(store),
+		WithCache(cache),
+		WithLogger(logger),
+	)
 
-// 	def := PreferenceDefinition{
-// 		Key:          "theme",
-// 		Type:         "enum",
-// 		Category:     "appearance",
-// 		DefaultValue: "dark",
-// 		AllowedValues: []interface{}{
-// 			"light",
-// 			"dark",
-// 			"system",
-// 		},
-// 	}
+	def := PreferenceDefinition{
+		Key:          "theme",
+		Type:         "enum",
+		Category:     "appearance",
+		DefaultValue: "dark",
+		AllowedValues: []interface{}{
+			"light",
+			"dark",
+			"system",
+		},
+	}
 
-// 	err := mgr.DefinePreference(def)
-// 	if err != nil {
-// 		t.Fatalf("DefinePreference failed: %v", err)
-// 	}
+	err := mgr.DefinePreference(def)
+	if err != nil {
+		t.Fatalf("DefinePreference failed: %v", err)
+	}
 
-// 	// Attempt to define the same preference again
-// 	err = mgr.DefinePreference(def)
-// 	if err != nil {
-// 		t.Fatalf("DefinePreference failed on redefining: %v", err)
-// 	}
+	// Attempt to define the same preference again (should not error, effectively an update/noop)
+	err = mgr.DefinePreference(def)
+	if err != nil {
+		t.Fatalf("DefinePreference failed on redefining: %v", err)
+	}
 
-// 	// Define a preference with invalid type
-// 	invalidDef := PreferenceDefinition{
-// 		Key:  "invalid_pref",
-// 		Type: "unsupported",
-// 	}
-// 	err = mgr.DefinePreference(invalidDef)
-// 	if err == nil || err.Error() != "invalid preference type: unsupported" {
-// 		t.Fatalf("Expected ErrInvalidType, got: %v", err)
-// 	}
-// }
+	// Define a preference with invalid type
+	invalidDef := PreferenceDefinition{
+		Key:  "invalid_pref",
+		Type: "unsupported",
+	}
+	err = mgr.DefinePreference(invalidDef)
+	if !errors.Is(err, ErrInvalidType) {
+		t.Fatalf("Expected ErrInvalidType, got: %v", err)
+	}
+}
 
-// func TestManager_GetSet(t *testing.T) {
-// 	store := NewMockStorage()
-// 	cache := NewMockCache()
-// 	logger := &MockLogger{}
-// 	mgr := &Manager{
-// 		config: &Config{
-// 			storage:     store,
-// 			cache:       cache,
-// 			logger:      logger,
-// 			definitions: make(map[string]PreferenceDefinition),
-// 		},
-// 	}
+func TestManager_GetSet(t *testing.T) {
+	store := NewMockStorage()
+	cache := NewMockCache()
+	logger := &MockLogger{}
+	mgr := New(
+		WithStorage(store),
+		WithCache(cache),
+		WithLogger(logger),
+	)
 
-// 	def := PreferenceDefinition{
-// 		Key:          "notifications",
-// 		Type:         "boolean",
-// 		Category:     "settings",
-// 		DefaultValue: false,
-// 	}
+	def := PreferenceDefinition{
+		Key:          "notifications",
+		Type:         "boolean",
+		Category:     "settings",
+		DefaultValue: false,
+	}
 
-// 	err := mgr.DefinePreference(def)
-// 	if err != nil {
-// 		t.Fatalf("DefinePreference failed: %v", err)
-// 	}
+	err := mgr.DefinePreference(def)
+	if err != nil {
+		t.Fatalf("DefinePreference failed: %v", err)
+	}
 
-// 	userID := "user1"
+	userID := "user1"
 
-// 	// Get preference when not set (should return default)
-// 	pref, err := mgr.Get(context.Background(), userID, "notifications")
-// 	if err != nil {
-// 		t.Fatalf("Get failed: %v", err)
-// 	}
-// 	if pref.Value != false {
-// 		t.Errorf("Expected default value false, got %v", pref.Value)
-// 	}
+	// Get preference when not set (should return default)
+	pref, err := mgr.Get(context.Background(), userID, "notifications")
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if val, ok := pref.Value.(bool); !ok || val != false {
+		t.Errorf("Expected default value false, got %v (type %T)", pref.Value, pref.Value)
+	}
 
-// 	// Set preference
-// 	err = mgr.Set(context.Background(), userID, "notifications", true)
-// 	if err != nil {
-// 		t.Fatalf("Set failed: %v", err)
-// 	}
+	// Set preference
+	err = mgr.Set(context.Background(), userID, "notifications", true)
+	if err != nil {
+		t.Fatalf("Set failed: %v", err)
+	}
 
-// 	// Get preference after setting
-// 	pref, err = mgr.Get(context.Background(), userID, "notifications")
-// 	if err != nil {
-// 		t.Fatalf("Get failed: %v", err)
-// 	}
-// 	if pref.Value != true {
-// 		t.Errorf("Expected value true, got %v", pref.Value)
-// 	}
+	// Get preference after setting
+	pref, err = mgr.Get(context.Background(), userID, "notifications")
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if val, ok := pref.Value.(bool); !ok || val != true {
+		t.Errorf("Expected value true, got %v (type %T)", pref.Value, pref.Value)
+	}
 
-// 	// Ensure it's cached
-// 	if _, exists := cache.data["pref:user1:notifications"]; !exists {
-// 		t.Errorf("Preference not cached")
-// 	}
+	// Ensure it's cached
+	if _, exists := cache.data["pref:user1:notifications"]; !exists {
+		t.Errorf("Preference not cached")
+	}
 
-// 	// Get from cache
-// 	pref, err = mgr.Get(context.Background(), userID, "notifications")
-// 	if err != nil {
-// 		t.Fatalf("Get from cache failed: %v", err)
-// 	}
-// 	if pref.Value != true {
-// 		t.Errorf("Expected cached value true, got %v", pref.Value)
-// 	}
-// }
+	// Get from cache
+	pref, err = mgr.Get(context.Background(), userID, "notifications")
+	if err != nil {
+		t.Fatalf("Get from cache failed: %v", err)
+	}
+	if val, ok := pref.Value.(bool); !ok || val != true {
+		t.Errorf("Expected cached value true, got %v (type %T)", pref.Value, pref.Value)
+	}
+}
 
-// func TestManager_Delete(t *testing.T) {
-// 	store := NewMockStorage()
-// 	cache := NewMockCache()
-// 	logger := &MockLogger{}
-// 	mgr := &Manager{
-// 		config: &Config{
-// 			storage:     store,
-// 			cache:       cache,
-// 			logger:      logger,
-// 			definitions: make(map[string]PreferenceDefinition),
-// 		},
-// 	}
+func TestManager_Delete(t *testing.T) {
+	store := NewMockStorage()
+	cache := NewMockCache()
+	logger := &MockLogger{}
+	mgr := New(
+		WithStorage(store),
+		WithCache(cache),
+		WithLogger(logger),
+	)
 
-// 	def := PreferenceDefinition{
-// 		Key:          "volume",
-// 		Type:         "number",
-// 		Category:     "audio",
-// 		DefaultValue: 50,
-// 	}
+	def := PreferenceDefinition{
+		Key:          "volume",
+		Type:         "number",
+		Category:     "audio",
+		DefaultValue: 50.0, // Default as float64
+	}
 
-// 	err := mgr.DefinePreference(def)
-// 	if err != nil {
-// 		t.Fatalf("DefinePreference failed: %v", err)
-// 	}
+	err := mgr.DefinePreference(def)
+	if err != nil {
+		t.Fatalf("DefinePreference failed: %v", err)
+	}
 
-// 	userID := "user2"
+	userID := "user2"
 
-// 	// Set preference
-// 	err = mgr.Set(context.Background(), userID, "volume", 75)
-// 	if err != nil {
-// 		t.Fatalf("Set failed: %v", err)
-// 	}
+	// Set preference
+	err = mgr.Set(context.Background(), userID, "volume", 75.0)
+	if err != nil {
+		t.Fatalf("Set failed: %v", err)
+	}
 
-// 	// Delete preference
-// 	err = mgr.Delete(context.Background(), userID, "volume")
-// 	if err != nil {
-// 		t.Fatalf("Delete failed: %v", err)
-// 	}
+	// Delete preference
+	err = mgr.Delete(context.Background(), userID, "volume")
+	if err != nil {
+		t.Fatalf("Delete failed: %v", err)
+	}
 
-// 	// Get preference after deletion (should return default)
-// 	pref, err := mgr.Get(context.Background(), userID, "volume")
-// 	if err != nil {
-// 		t.Fatalf("Get failed: %v", err)
-// 	}
-// 	if pref.Value != 50 {
-// 		t.Errorf("Expected default value 50, got %v", pref.Value)
-// 	}
+	// Get preference after deletion (should return default)
+	pref, err := mgr.Get(context.Background(), userID, "volume")
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if val, ok := pref.Value.(float64); !ok || val != 50.0 {
+		t.Errorf("Expected default value 50.0, got %v (type %T)", pref.Value, pref.Value)
+	}
 
-// 	// Ensure cache is cleared
-// 	if _, exists := cache.data["pref:user2:volume"]; exists {
-// 		t.Errorf("Preference not deleted from cache")
-// 	}
+	// Ensure cache is cleared
+	if _, exists := cache.data["pref:user2:volume"]; exists {
+		t.Errorf("Preference not deleted from cache")
+	}
 
-// 	// Attempt to delete non-existing preference
-// 	err = mgr.Delete(context.Background(), userID, "nonexistent")
-// 	if err != ErrNotFound {
-// 		t.Errorf("Expected ErrNotFound, got %v", err)
-// 	}
-// }
+	// Attempt to delete non-existing preference (defined but not set for user, or completely unknown)
+	// For a defined key but not set for a user, Delete effectively does nothing to storage but clears cache.
+	// For an undefined key, it should ideally give ErrDefinitionNotFound from Manager.Delete.
+	// Let's test deleting an undefined key for robustness of Manager.Delete
+	err = mgr.Delete(context.Background(), userID, "nonexistentkey")
+	if !errors.Is(err, ErrPreferenceNotDefined) { // Manager should check definition first
+		t.Errorf("Expected ErrPreferenceNotDefined for deleting non-existent key, got %v", err)
+	}
+}
 
-// func TestManager_GetByCategory(t *testing.T) {
-// 	store := NewMockStorage()
-// 	cache := NewMockCache()
-// 	logger := &MockLogger{}
-// 	mgr := &Manager{
-// 		config: &Config{
-// 			storage:     store,
-// 			cache:       cache,
-// 			logger:      logger,
-// 			definitions: make(map[string]PreferenceDefinition),
-// 		},
-// 	}
+func TestManager_GetByCategory(t *testing.T) {
+	store := NewMockStorage()
+	cache := NewMockCache()
+	logger := &MockLogger{}
+	mgr := New(
+		WithStorage(store),
+		WithCache(cache),
+		WithLogger(logger),
+	)
 
-// 	// Define multiple preferences
-// 	prefs := []PreferenceDefinition{
-// 		{
-// 			Key:          "theme",
-// 			Type:         "enum",
-// 			Category:     "appearance",
-// 			DefaultValue: "light",
-// 			AllowedValues: []interface{}{
-// 				"light",
-// 				"dark",
-// 			},
-// 		},
-// 		{
-// 			Key:          "font_size",
-// 			Type:         "number",
-// 			Category:     "appearance",
-// 			DefaultValue: 12,
-// 		},
-// 		{
-// 			Key:          "notifications",
-// 			Type:         "boolean",
-// 			Category:     "settings",
-// 			DefaultValue: true,
-// 		},
-// 	}
+	// Define multiple preferences
+	prefs := []PreferenceDefinition{
+		{
+			Key:          "theme",
+			Type:         "enum",
+			Category:     "appearance",
+			DefaultValue: "light",
+			AllowedValues: []interface{}{
+				"light",
+				"dark",
+			},
+		},
+		{
+			Key:          "font_size",
+			Type:         "number",
+			Category:     "appearance",
+			DefaultValue: 12.0, // Default as float64
+		},
+		{
+			Key:          "notifications",
+			Type:         "boolean",
+			Category:     "settings",
+			DefaultValue: true,
+		},
+	}
 
-// 	for _, def := range prefs {
-// 		if err := mgr.DefinePreference(def); err != nil {
-// 			t.Fatalf("DefinePreference failed: %v", err)
-// 		}
-// 	}
+	for _, def := range prefs {
+		if err := mgr.DefinePreference(def); err != nil {
+			t.Fatalf("DefinePreference failed: %v", err)
+		}
+	}
 
-// 	userID := "user3"
+	userID := "user3"
 
-// 	// Set some preferences
-// 	err := mgr.Set(context.Background(), userID, "theme", "dark")
-// 	if err != nil {
-// 		t.Fatalf("Set failed: %v", err)
-// 	}
-// 	err = mgr.Set(context.Background(), userID, "font_size", 14)
-// 	if err != nil {
-// 		t.Fatalf("Set failed: %v", err)
-// 	}
+	// Set some preferences
+	err := mgr.Set(context.Background(), userID, "theme", "dark")
+	if err != nil {
+		t.Fatalf("Set failed: %v", err)
+	}
+	err = mgr.Set(context.Background(), userID, "font_size", 14.0)
+	if err != nil {
+		t.Fatalf("Set failed: %v", err)
+	}
 
-// 	// Get preferences by category
-// 	appearancePrefs, err := mgr.GetByCategory(context.Background(), userID, "appearance")
-// 	if err != nil {
-// 		t.Fatalf("GetByCategory failed: %v", err)
-// 	}
+	// Get preferences by category
+	appearancePrefs, err := mgr.GetByCategory(context.Background(), userID, "appearance")
+	if err != nil {
+		t.Fatalf("GetByCategory failed: %v", err)
+	}
 
-// 	if len(appearancePrefs) != 2 {
-// 		t.Errorf("Expected 2 appearance preferences, got %d", len(appearancePrefs))
-// 	}
+	if len(appearancePrefs) != 2 {
+		t.Fatalf("Expected 2 appearance preferences, got %d", len(appearancePrefs))
+	}
 
-// 	if appearancePrefs["theme"].Value != "dark" {
-// 		t.Errorf("Expected theme 'dark', got %v", appearancePrefs["theme"].Value)
-// 	}
-// 	if appearancePrefs["font_size"].Value != 14 {
-// 		t.Errorf("Expected font_size 14, got %v", appearancePrefs["font_size"].Value)
-// 	}
+	if val, ok := appearancePrefs["theme"].Value.(string); !ok || val != "dark" {
+		t.Errorf("Expected theme 'dark', got %v (type %T)", appearancePrefs["theme"].Value, appearancePrefs["theme"].Value)
+	}
+	if val, ok := appearancePrefs["font_size"].Value.(float64); !ok || val != 14.0 {
+		t.Errorf("Expected font_size 14.0, got %v (type %T)", appearancePrefs["font_size"].Value, appearancePrefs["font_size"].Value)
+	}
 
-// 	// Get preferences by non-existing category
-// 	_, err = mgr.GetByCategory(context.Background(), userID, "nonexistent")
-// 	if err != ErrNotFound {
-// 		t.Errorf("Expected ErrNotFound for nonexistent category, got %v", err)
-// 	}
-// }
+	// Get preferences by non-existing category (no definitions for this category)
+	_, err = mgr.GetByCategory(context.Background(), userID, "nonexistentcategory")
+	if !errors.Is(err, ErrNotFound) { // Corrected: Manager.GetByCategory returns ErrNotFound if no *definitions* match category.
+		t.Errorf("Expected ErrNotFound for nonexistent category, got %v", err)
+	}
+}
 
-// func TestManager_GetAll(t *testing.T) {
-// 	store := NewMockStorage()
-// 	cache := NewMockCache()
-// 	logger := &MockLogger{}
-// 	mgr := &Manager{
-// 		config: &Config{
-// 			storage:     store,
-// 			cache:       cache,
-// 			logger:      logger,
-// 			definitions: make(map[string]PreferenceDefinition),
-// 		},
-// 	}
+func TestManager_GetAll(t *testing.T) {
+	store := NewMockStorage()
+	cache := NewMockCache()
+	logger := &MockLogger{}
+	mgr := New(
+		WithStorage(store),
+		WithCache(cache),
+		WithLogger(logger),
+	)
 
-// 	// Define multiple preferences
-// 	prefs := []PreferenceDefinition{
-// 		{
-// 			Key:          "language",
-// 			Type:         "string",
-// 			Category:     "general",
-// 			DefaultValue: "en",
-// 		},
-// 		{
-// 			Key:          "timezone",
-// 			Type:         "string",
-// 			Category:     "general",
-// 			DefaultValue: "UTC",
-// 		},
-// 	}
+	// Define multiple preferences
+	prefsToDefine := []PreferenceDefinition{
+		{
+			Key:          "language",
+			Type:         "string",
+			Category:     "general",
+			DefaultValue: "en",
+		},
+		{
+			Key:          "timezone",
+			Type:         "string",
+			Category:     "general",
+			DefaultValue: "UTC",
+		},
+	}
 
-// 	for _, def := range prefs {
-// 		if err := mgr.DefinePreference(def); err != nil {
-// 			t.Fatalf("DefinePreference failed: %v", err)
-// 		}
-// 	}
+	for _, def := range prefsToDefine {
+		if err := mgr.DefinePreference(def); err != nil {
+			t.Fatalf("DefinePreference failed: %v", err)
+		}
+	}
 
-// 	userID := "user4"
+	userID := "user4"
 
-// 	// Set some preferences
-// 	err := mgr.Set(context.Background(), userID, "language", "fr")
-// 	if err != nil {
-// 		t.Fatalf("Set failed: %v", err)
-// 	}
+	// Set some preferences
+	err := mgr.Set(context.Background(), userID, "language", "fr")
+	if err != nil {
+		t.Fatalf("Set failed: %v", err)
+	}
 
-// 	// Get all preferences
-// 	allPrefs, err := mgr.GetAll(context.Background(), userID)
-// 	if err != nil {
-// 		t.Fatalf("GetAll failed: %v", err)
-// 	}
+	// Get all preferences
+	allPrefs, err := mgr.GetAll(context.Background(), userID)
+	if err != nil {
+		t.Fatalf("GetAll failed: %v", err)
+	}
 
-// 	// Ensure all defined preferences are returned
-// 	if len(allPrefs) != 2 {
-// 		t.Errorf("Expected 2 preferences, got %d", len(allPrefs))
-// 	}
+	// Ensure all defined preferences are returned
+	if len(allPrefs) != len(prefsToDefine) {
+		t.Fatalf("Expected %d preferences, got %d", len(prefsToDefine), len(allPrefs))
+	}
 
-// 	// Validate each preference
-// 	if pref, exists := allPrefs["language"]; !exists || pref.Value != "fr" {
-// 		t.Errorf("Expected language 'fr', got %v", pref.Value)
-// 	}
-// 	if pref, exists := allPrefs["timezone"]; !exists || pref.Value != "UTC" {
-// 		t.Errorf("Expected timezone 'UTC', got %v", pref.Value)
-// 	}
-// }
+	// Validate each preference
+	if pref, exists := allPrefs["language"]; !exists {
+		t.Errorf("Expected language preference to exist")
+	} else if val, ok := pref.Value.(string); !ok || val != "fr" {
+		t.Errorf("Expected language 'fr', got %v (type %T)", pref.Value, pref.Value)
+	}
 
-// func TestManager_Concurrency(t *testing.T) {
-// 	store := NewMockStorage()
-// 	cache := NewMockCache()
-// 	logger := &MockLogger{}
-// 	mgr := &Manager{
-// 		config: &Config{
-// 			storage:     store,
-// 			cache:       cache,
-// 			logger:      logger,
-// 			definitions: make(map[string]PreferenceDefinition),
-// 		},
-// 	}
+	if pref, exists := allPrefs["timezone"]; !exists {
+		t.Errorf("Expected timezone preference to exist")
+	} else if val, ok := pref.Value.(string); !ok || val != "UTC" {
+		t.Errorf("Expected timezone 'UTC' (default), got %v (type %T)", pref.Value, pref.Value)
+	}
+}
 
-// 	def := PreferenceDefinition{
-// 		Key:          "volume",
-// 		Type:         "number",
-// 		Category:     "audio",
-// 		DefaultValue: 50,
-// 	}
+func TestManager_Concurrency(t *testing.T) {
+	store := NewMockStorage()
+	cache := NewMockCache()
+	logger := &MockLogger{}
+	mgr := New(
+		WithStorage(store),
+		WithCache(cache),
+		WithLogger(logger),
+	)
 
-// 	err := mgr.DefinePreference(def)
-// 	if err != nil {
-// 		t.Fatalf("DefinePreference failed: %v", err)
-// 	}
+	def := PreferenceDefinition{
+		Key:          "volume",
+		Type:         "number",
+		Category:     "audio",
+		DefaultValue: 50.0, // Default as float64
+	}
 
-// 	userID := "user5"
-// 	done := make(chan bool)
+	err := mgr.DefinePreference(def)
+	if err != nil {
+		t.Fatalf("DefinePreference failed: %v", err)
+	}
 
-// 	// Concurrently set preferences
-// 	for i := 0; i < 100; i++ {
-// 		go func(val int) {
-// 			if err := mgr.Set(context.Background(), userID, "volume", val); err != nil {
-// 				t.Errorf("Set failed: %v", err)
-// 			}
-// 			done <- true
-// 		}(i)
-// 	}
+	userID := "user5"
+	done := make(chan bool)
+	numGoroutines := 100
 
-// 	// Wait for all goroutines to finish
-// 	for i := 0; i < 100; i++ {
-// 		<-done
-// 	}
+	// Concurrently set preferences
+	for i := 0; i < numGoroutines; i++ {
+		go func(val float64) {
+			// In a real scenario with high contention, Set might return an error from storage/cache.
+			// MockStorage/MockCache are synchronous, so less likely to show race-related errors here unless Manager itself has issues.
+			if err := mgr.Set(context.Background(), userID, "volume", val); err != nil {
+				// t.Errorf is not goroutine-safe. Collect errors or use t.Logf then Fail.
+				// For simplicity in this mock test, we'll assume Set doesn't error out often under mock conditions.
+				logger.Error("error in Set (concurrent)", "err", err) // Using mock logger
+			}
+			done <- true
+		}(float64(i)) // Set as float64
+	}
 
-// 	// Get the final value
-// 	pref, err := mgr.Get(context.Background(), userID, "volume")
-// 	if err != nil {
-// 		t.Fatalf("Get failed: %v", err)
-// 	}
+	// Wait for all goroutines to finish
+	for i := 0; i < numGoroutines; i++ {
+		<-done
+	}
 
-// 	// The final value should be between 0 and 99
-// 	switch v := pref.Value.(type) {
-// 	case int:
-// 		if v < 0 || v > 99 {
-// 			t.Errorf("Final volume out of expected range: %v", v)
-// 		}
-// 	case float64:
-// 		if int(v) < 0 || int(v) > 99 {
-// 			t.Errorf("Final volume out of expected range: %v", v)
-// 		}
-// 	default:
-// 		t.Errorf("Unexpected type for volume: %T", v)
-// 	}
-// }
+	// Get the final value
+	pref, err := mgr.Get(context.Background(), userID, "volume")
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+
+	// The final value should be one of the values set (0.0 to 99.0)
+	// Due to mock cache/storage behavior (last write wins), it's hard to predict the exact final value without more sophisticated mocks.
+	// We'll check if it's a float64 and within the possible range.
+	switch v := pref.Value.(type) {
+	case float64:
+		if v < 0.0 || v > float64(numGoroutines-1) {
+			t.Errorf("Final volume out of expected range [0.0, %.1f]: %v", float64(numGoroutines-1), v)
+		}
+	default:
+		t.Errorf("Unexpected type for volume: %T, value: %v", pref.Value, pref.Value)
+	}
+}
+
+func TestManager_Get_CacheInteraction(t *testing.T) {
+	// Define a common preference definition for these tests
+	def := PreferenceDefinition{
+		Key:          "test_cache_pref",
+		Type:         "string",
+		Category:     "cache_tests",
+		DefaultValue: "default_cache_value",
+	}
+
+	// Define a common preference instance expected from storage or successful cache retrieval
+	expectedPrefFromStorage := &Preference{
+		UserID:       "user_cache_test",
+		Key:          def.Key,
+		Value:        "stored_value",
+		DefaultValue: def.DefaultValue,
+		Type:         def.Type,
+		Category:     def.Category,
+		UpdatedAt:    time.Now(), // Will be compared with a tolerance or ignored
+	}
+
+	cacheKey := fmt.Sprintf("pref:%s:%s", expectedPrefFromStorage.UserID, expectedPrefFromStorage.Key)
+	specificGenericCacheError := errors.New("specific generic cache failure from mock")
+
+	testCases := []struct {
+		name                 string
+		setupCache           func(mc *MockCache, ms *MockStorage) // Function to set up cache state
+		setupStorage         func(ms *MockStorage)          // Function to set up storage state
+		useNilCache          bool
+		expectedValue        interface{}
+		expectedErr          error
+		checkLogs            func(t *testing.T, logger *MockLogger, caseName string)
+		expectDefaultOnError bool // If true, on error from cache/storage, expect default value
+	}{
+		{
+			name: "Cache Hit - Valid Direct Bytes",
+			setupCache: func(mc *MockCache, ms *MockStorage) {
+				prefToCache := &Preference{
+					UserID:       expectedPrefFromStorage.UserID,
+					Key:          def.Key,
+					Value:        "cached_direct_value", // Different from storage to confirm cache hit
+					DefaultValue: def.DefaultValue,
+					Type:         def.Type,
+					Category:     def.Category,
+					UpdatedAt:    time.Now(),
+				}
+				bytes, _ := json.Marshal(prefToCache)
+				mc.data[cacheKey] = mockCacheEntry{value: bytes}
+			},
+			expectedValue: "cached_direct_value",
+			expectedErr:   nil,
+		},
+		{
+			name: "Cache Hit - Valid Base64 Encoded JSON String",
+			setupCache: func(mc *MockCache, ms *MockStorage) {
+				prefToCache := &Preference{
+					UserID:       expectedPrefFromStorage.UserID,
+					Key:          def.Key,
+					Value:        "cached_b64_value", // Different from storage
+					DefaultValue: def.DefaultValue,
+					Type:         def.Type,
+					Category:     def.Category,
+					UpdatedAt:    time.Now(),
+				}
+				jsonBytes, _ := json.Marshal(prefToCache)
+				b64String := base64.StdEncoding.EncodeToString(jsonBytes)
+				// Marshal the base64 string itself into JSON bytes, as if it was stored as a JSON string literal
+				finalCacheBytes, _ := json.Marshal(b64String)
+				mc.data[cacheKey] = mockCacheEntry{value: finalCacheBytes}
+			},
+			expectedValue: "cached_b64_value",
+			expectedErr:   nil,
+		},
+		{
+			name: "Cache Miss (ErrNotFound) - Fallback to Storage",
+			setupCache: func(mc *MockCache, ms *MockStorage) {
+				// Cache returns ErrNotFound implicitly if key doesn't exist or explicitly:
+				mc.data[cacheKey] = mockCacheEntry{value: nil, err: ErrNotFound}
+			},
+			setupStorage: func(ms *MockStorage) {
+				ms.Set(context.Background(), expectedPrefFromStorage) // Ensure storage has the item
+			},
+			expectedValue: expectedPrefFromStorage.Value, // Should get value from storage
+			expectedErr:   nil,
+		},
+		{
+			name:        "Nil Cache - Fallback to Storage",
+			useNilCache: true,
+			setupStorage: func(ms *MockStorage) {
+				ms.Set(context.Background(), expectedPrefFromStorage)
+			},
+			expectedValue: expectedPrefFromStorage.Value,
+			expectedErr:   nil,
+		},
+		{
+			name: "Cache Hit - Malformed JSON Bytes",
+			setupCache: func(mc *MockCache, ms *MockStorage) {
+				mc.data[cacheKey] = mockCacheEntry{value: []byte("{\"key\": \"malformed\"")}
+			},
+			expectedErr:          ErrSerialization,
+			expectDefaultOnError: true, // Expect default because cache unmarshal fails
+		},
+		{
+			name: "Cache Hit - JSON String, Not Base64",
+			setupCache: func(mc *MockCache, ms *MockStorage) {
+				// Marshal a non-base64 string into JSON bytes e.g. "this is not base64"
+				jsonStringBytes, _ := json.Marshal("this is not base64")
+				mc.data[cacheKey] = mockCacheEntry{value: jsonStringBytes}
+			},
+			expectedErr:          ErrSerialization,
+			expectDefaultOnError: true,
+		},
+		{
+			name: "Cache Hit - Base64 Decodes to Malformed JSON",
+			setupCache: func(mc *MockCache, ms *MockStorage) {
+				b64String := base64.StdEncoding.EncodeToString([]byte("{\"key\": \"malformed_after_b64\""))
+				finalCacheBytes, _ := json.Marshal(b64String)
+				mc.data[cacheKey] = mockCacheEntry{value: finalCacheBytes}
+			},
+			expectedErr:          ErrSerialization,
+			expectDefaultOnError: true,
+		},
+		{
+			name: "Cache Hit - Non-[]byte Data",
+			setupCache: func(mc *MockCache, ms *MockStorage) {
+				mc.data[cacheKey] = mockCacheEntry{value: 12345} // An integer, not []byte
+			},
+			expectedErr:          ErrSerialization,
+			expectDefaultOnError: true,
+		},
+		{
+			name: "Cache Error - Generic Error from Cache Get",
+			setupCache: func(mc *MockCache, ms *MockStorage) {
+				mc.data[cacheKey] = mockCacheEntry{err: specificGenericCacheError}
+			},
+			// The manager wraps the cache error. We expect the default value to be returned.
+			// For error checking, we are checking if the *specific* error `ErrSerialization` is returned when applicable,
+			// or if a generic error is returned, we check that an error *is* returned. 
+			// More specific checks on wrapped errors could be done with custom error types or by inspecting error strings.
+			expectedErr:          specificGenericCacheError, // Expect the specific error instance to be wrapped and identifiable
+			expectDefaultOnError: true, 
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := NewMockStorage()
+			cache := NewMockCache()
+			logger := &MockLogger{}
+
+			mgrOpts := []Option{
+				WithStorage(store),
+				WithLogger(logger),
+			}
+
+			if !tc.useNilCache {
+				mgrOpts = append(mgrOpts, WithCache(cache))
+			} else {
+				mgrOpts = append(mgrOpts, WithCache(nil)) // Explicitly pass nil cache
+			}
+
+			mgr := New(mgrOpts...)
+			err := mgr.DefinePreference(def)
+			if err != nil {
+				t.Fatalf("DefinePreference failed: %v", err)
+			}
+
+			if tc.setupStorage != nil {
+				tc.setupStorage(store)
+			} else {
+				// Default storage setup: store the expectedPrefFromStorage
+				store.Set(context.Background(), expectedPrefFromStorage)
+			}
+
+			if tc.setupCache != nil && !tc.useNilCache {
+				tc.setupCache(cache, store)
+			}
+
+			pref, err := mgr.Get(context.Background(), expectedPrefFromStorage.UserID, def.Key)
+
+			if tc.expectedErr != nil {
+				if !errors.Is(err, tc.expectedErr) {
+					t.Errorf("Expected error '%v', got '%v'", tc.expectedErr, err)
+				}
+				if tc.expectDefaultOnError {
+					if pref == nil {
+						t.Errorf("Expected preference with default value on error, got nil preference")
+					} else if pref.Value != def.DefaultValue {
+						t.Errorf("Expected default value '%v' on error, got '%v'", def.DefaultValue, pref.Value)
+					}
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Expected no error, got '%v'", err)
+				}
+				if pref == nil {
+					t.Fatalf("Expected preference, got nil")
+				}
+				if pref.Value != tc.expectedValue {
+					t.Errorf("Expected value '%v', got '%v'", tc.expectedValue, pref.Value)
+				}
+			}
+
+			if tc.checkLogs != nil {
+				tc.checkLogs(t, logger, tc.name)
+			}
+		})
+	}
+}

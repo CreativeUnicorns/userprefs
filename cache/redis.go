@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/CreativeUnicorns/userprefs"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -47,20 +48,14 @@ func NewRedisCache(addr string, password string, db int) (*RedisCache, error) {
 // Get retrieves a value from Redis by key.
 // It returns an error if the key does not exist or if there is a failure in retrieval.
 func (c *RedisCache) Get(ctx context.Context, key string) (interface{}, error) {
-	data, err := c.client.Get(ctx, key).Bytes()
+	data, err := c.client.Get(ctx, key).Bytes() // Ensure .Bytes() is used
 	if err == redis.Nil {
-		return nil, ErrNotFound
+		return nil, userprefs.ErrNotFound // Cache miss, use error from main userprefs package
 	}
 	if err != nil {
-		return nil, fmt.Errorf("failed to get from redis: %w", err)
+		return nil, fmt.Errorf("failed to get from redis: %w", err) // Other Redis error
 	}
-
-	var value interface{}
-	if err := json.Unmarshal(data, &value); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal cached value: %w", err)
-	}
-
-	return value, nil
+	return data, nil // Return the []byte
 }
 
 // Set stores a value in Redis with an optional TTL.

@@ -2,8 +2,11 @@ package cache
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
+
+	"github.com/CreativeUnicorns/userprefs"
 )
 
 func TestMemoryCache_GetSet(t *testing.T) {
@@ -32,6 +35,12 @@ func TestMemoryCache_GetSet(t *testing.T) {
 	if val != value {
 		t.Errorf("Expected '%s', got '%v'", value, val)
 	}
+
+	// Test Get non-existent key
+	_, err = cache.Get(ctx, "nonExistentKey")
+	if !errors.Is(err, userprefs.ErrNotFound) {
+		t.Errorf("Expected ErrNotFound for non-existent key, got: %v", err)
+	}
 }
 
 func TestMemoryCache_Delete(t *testing.T) {
@@ -59,8 +68,8 @@ func TestMemoryCache_Delete(t *testing.T) {
 
 	// Ensure key is deleted
 	_, err := cache.Get(ctx, key)
-	if err == nil {
-		t.Errorf("Expected error for deleted key, got none")
+	if !errors.Is(err, userprefs.ErrNotFound) {
+		t.Errorf("Expected ErrNotFound for deleted key, got: %v", err)
 	}
 }
 
@@ -80,7 +89,7 @@ func TestMemoryCache_Close(t *testing.T) {
 
 	// Attempt to get a key after closing
 	_, err := cache.Get(ctx, "key")
-	if err != nil && err.Error() != ErrNotFound.Error() {
+	if !errors.Is(err, userprefs.ErrNotFound) {
 		t.Errorf("Expected ErrNotFound after closing, got: %v", err)
 	}
 }
@@ -111,13 +120,13 @@ func TestMemoryCache_GarbageCollection(t *testing.T) {
 
 	// key1 and key2 should be expired, key3 should exist
 	_, err := cache.Get(ctx, "key1")
-	if err == nil {
-		t.Errorf("Expected key1 to be expired")
+	if !errors.Is(err, userprefs.ErrNotFound) {
+		t.Errorf("Expected ErrKeyExpired for key1, got: %v", err)
 	}
 
 	_, err = cache.Get(ctx, "key2")
-	if err == nil {
-		t.Errorf("Expected key2 to be expired")
+	if !errors.Is(err, userprefs.ErrNotFound) {
+		t.Errorf("Expected ErrKeyExpired for key2, got: %v", err)
 	}
 
 	val, err := cache.Get(ctx, "key3")

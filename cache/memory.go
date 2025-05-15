@@ -3,9 +3,10 @@ package cache
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
+
+	"github.com/CreativeUnicorns/userprefs"
 )
 
 // item represents a single cache item with a value and an expiration time.
@@ -18,6 +19,7 @@ type item struct {
 type MemoryCache struct {
 	mu    sync.RWMutex
 	items map[string]item
+	stop  chan struct{} // Channel to signal gc goroutine to stop
 }
 
 // NewMemoryCache initializes a new MemoryCache instance.
@@ -25,6 +27,7 @@ type MemoryCache struct {
 func NewMemoryCache() *MemoryCache {
 	cache := &MemoryCache{
 		items: make(map[string]item),
+		stop:  make(chan struct{}),
 	}
 	go cache.gc()
 	return cache
@@ -38,11 +41,15 @@ func (c *MemoryCache) Get(_ context.Context, key string) (interface{}, error) {
 
 	it, exists := c.items[key]
 	if !exists {
-		return nil, fmt.Errorf("key not found")
+		return nil, userprefs.ErrNotFound // Use error from main userprefs package
 	}
 
 	if !it.expiration.IsZero() && time.Now().After(it.expiration) {
-		return nil, fmt.Errorf("key expired")
+		// For key expired, we could also use userprefs.ErrNotFound or a more specific one if available.
+		// For now, let's assume manager treats any non-nil error other than userprefs.ErrNotFound from cache as a problem.
+		// If key expired should be treated as a cache miss by the manager, this should also be userprefs.ErrNotFound.
+		// Let's change it to userprefs.ErrNotFound for now to simplify manager logic, assuming expired = not found for manager's purposes.
+		return nil, userprefs.ErrNotFound // Treat expired as not found for the manager
 	}
 
 	return it.value, nil
@@ -81,7 +88,11 @@ func (c *MemoryCache) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	c.items = make(map[string]item)
+	// Signal the gc goroutine to stop
+	// Ensure this is done before clearing items if gc also accesses items
+	close(c.stop)
+
+	c.items = make(map[string]item) // Clear items
 	return nil
 }
 
@@ -90,13 +101,18 @@ func (c *MemoryCache) gc() {
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 
-	for range ticker.C {
+	for {
+		select {
+		case <-ticker.C:
 		c.mu.Lock()
 		for key, it := range c.items {
 			if !it.expiration.IsZero() && time.Now().After(it.expiration) {
 				delete(c.items, key)
 			}
+			}
+			c.mu.Unlock()
+		case <-c.stop:
+			return // Exit goroutine
 		}
-		c.mu.Unlock()
 	}
 }

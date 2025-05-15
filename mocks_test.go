@@ -117,19 +117,30 @@ func (m *MockStorage) Close() error {
 	return nil
 }
 
+// mockCacheEntry holds a value and an error for a cache key.
+// This allows tests to pre-configure specific return values and errors for MockCache.Get.
+type mockCacheEntry struct {
+	value interface{}
+	err   error
+}
+
 // MockCache implements the Cache interface for testing
 type MockCache struct {
 	mu     sync.RWMutex
-	data   map[string]interface{}
+	data   map[string]mockCacheEntry // Stores mockCacheEntry instead of raw interface{}
 	closed bool
 }
 
+// NewMockCache creates a new MockCache for testing.
 func NewMockCache() *MockCache {
 	return &MockCache{
-		data: make(map[string]interface{}),
+		data: make(map[string]mockCacheEntry),
 	}
 }
 
+// Get retrieves a value from the mock cache. It returns the pre-configured value and error
+// for the key if an entry exists. If an error is set in the entry, that error is returned.
+// If the key is not found, it returns (nil, ErrNotFound).
 func (m *MockCache) Get(ctx context.Context, key string) (interface{}, error) {
 	_, _ = ctx.Deadline()
 	m.mu.RLock()
@@ -139,16 +150,24 @@ func (m *MockCache) Get(ctx context.Context, key string) (interface{}, error) {
 		return nil, ErrCacheUnavailable
 	}
 
-	val, exists := m.data[key]
+	entry, exists := m.data[key]
 	if !exists {
-		return nil, ErrNotFound
+		return nil, ErrNotFound // Standard cache miss
 	}
-	return val, nil
+
+	if entry.err != nil {
+		return entry.value, entry.err // Return pre-configured error (value might also be set for some test cases)
+	}
+
+	return entry.value, nil
 }
 
+// Set stores a value in the mock cache. It wraps the value in a mockCacheEntry.
+// To simulate Set returning an error, the 'closed' flag can be used, or this method
+// could be extended if more complex error simulations for Set are needed.
 func (m *MockCache) Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error {
 	_, _ = ctx.Deadline()
-	_ = ttl
+	_ = ttl // TTL is ignored in this mock implementation
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -157,8 +176,10 @@ func (m *MockCache) Set(ctx context.Context, key string, value interface{}, ttl 
 		return ErrCacheUnavailable
 	}
 
-	m.data[key] = value
-	// TTL handling can be simulated if necessary
+	// Store as a mockCacheEntry with no error, as Set itself is successful.
+	// Errors for Get are configured by directly manipulating the 'data' map if needed for specific test cases,
+	// or by enhancing 'Set' to accept an error to be returned by subsequent 'Get's.
+	m.data[key] = mockCacheEntry{value: value, err: nil}
 	return nil
 }
 
