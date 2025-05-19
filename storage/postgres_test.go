@@ -70,18 +70,18 @@ func TestNewPostgresStorage(t *testing.T) {
 	t.Run("successful creation", func(t *testing.T) {
 		db, mock, err := sqlmock.New(sqlmock.MonitorPingsOption(true))
 		require.NoError(t, err)
-		defer db.Close()
+		defer func() { _ = db.Close() }()
 
 		mock.ExpectPing()
 		mock.ExpectExec(regexp.QuoteMeta(testCreateTableSQL)).WillReturnResult(sqlmock.NewResult(0, 0))
 
-		originalSqlOpen := sqlOpenFunc // Use the package-level var from postgres.go
-		sqlOpenFunc = func(driverName, dataSourceName string) (*sql.DB, error) {
+		originalSQLOpen := sqlOpenFunc // Use the package-level var from postgres.go
+		sqlOpenFunc = func(_, _ string) (*sql.DB, error) {
 			return db, nil // Return our mock DB
 		}
-		defer func() { sqlOpenFunc = originalSqlOpen }() // Restore original
+		defer func() { sqlOpenFunc = originalSQLOpen }() // Restore original
 
-		storage, err := NewPostgresStorage("dummy_conn_string")
+		storage, err := NewPostgresStorage(WithPostgresDSN("dummy_conn_string"), WithPostgresDBName("testdb"))
 		assert.NoError(t, err)
 		assert.NotNil(t, storage)
 		assert.NoError(t, mock.ExpectationsWereMet(), "sqlmock expectations not met")
@@ -89,13 +89,13 @@ func TestNewPostgresStorage(t *testing.T) {
 
 	t.Run("sql open error", func(t *testing.T) {
 		expectedErr := errors.New("failed to open database")
-		originalSqlOpen := sqlOpenFunc
-		sqlOpenFunc = func(driverName, dataSourceName string) (*sql.DB, error) {
+		originalSQLOpen := sqlOpenFunc
+		sqlOpenFunc = func(_, _ string) (*sql.DB, error) {
 			return nil, expectedErr
 		}
-		defer func() { sqlOpenFunc = originalSqlOpen }()
+		defer func() { sqlOpenFunc = originalSQLOpen }()
 
-		_, err := NewPostgresStorage("dummy_conn_string")
+		_, err := NewPostgresStorage(WithPostgresDSN("dummy_conn_string"), WithPostgresDBName("testdb"))
 		assert.Error(t, err)
 		assert.True(t, errors.Is(err, expectedErr), "Expected sql open error")
 	})
@@ -103,17 +103,17 @@ func TestNewPostgresStorage(t *testing.T) {
 	t.Run("ping error", func(t *testing.T) {
 		db, mock, err := sqlmock.New(sqlmock.MonitorPingsOption(true))
 		require.NoError(t, err)
-		defer db.Close()
+		defer func() { _ = db.Close() }()
 
 		mock.ExpectPing().WillReturnError(errors.New("ping failed"))
 
-		originalSqlOpen := sqlOpenFunc
-		sqlOpenFunc = func(driverName, dataSourceName string) (*sql.DB, error) {
+		originalSQLOpen := sqlOpenFunc
+		sqlOpenFunc = func(_, _ string) (*sql.DB, error) {
 			return db, nil
 		}
-		defer func() { sqlOpenFunc = originalSqlOpen }()
+		defer func() { sqlOpenFunc = originalSQLOpen }()
 
-		_, err = NewPostgresStorage("dummy_conn_string")
+		_, err = NewPostgresStorage(WithPostgresDSN("dummy_conn_string"), WithPostgresDBName("testdb"))
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "postgres: failed to ping database")
 		assert.NoError(t, mock.ExpectationsWereMet())
@@ -122,18 +122,18 @@ func TestNewPostgresStorage(t *testing.T) {
 	t.Run("migrate error", func(t *testing.T) {
 		db, mock, err := sqlmock.New(sqlmock.MonitorPingsOption(true))
 		require.NoError(t, err)
-		defer db.Close()
+		defer func() { _ = db.Close() }()
 
 		mock.ExpectPing()
 		mock.ExpectExec(regexp.QuoteMeta(testCreateTableSQL)).WillReturnError(errors.New("migrate failed"))
 
-		originalSqlOpen := sqlOpenFunc
-		sqlOpenFunc = func(driverName, dataSourceName string) (*sql.DB, error) {
+		originalSQLOpen := sqlOpenFunc
+		sqlOpenFunc = func(_, _ string) (*sql.DB, error) {
 			return db, nil
 		}
-		defer func() { sqlOpenFunc = originalSqlOpen }()
+		defer func() { sqlOpenFunc = originalSQLOpen }()
 
-		_, err = NewPostgresStorage("dummy_conn_string")
+		_, err = NewPostgresStorage(WithPostgresDSN("dummy_conn_string"), WithPostgresDBName("testdb"))
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to run migrations")
 		assert.NoError(t, mock.ExpectationsWereMet())
@@ -143,12 +143,13 @@ func TestNewPostgresStorage(t *testing.T) {
 func newTestPostgresStorage(t *testing.T) (*PostgresStorage, sqlmock.Sqlmock) {
 	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
 	require.NoError(t, err)
-	return &PostgresStorage{db: db}, mock // Pass the raw *sql.DB
+	// We don't run migrations here as individual method tests will mock specific SQL
+	return &PostgresStorage{db: db}, mock
 }
 
 func TestPostgresStorage_Set(t *testing.T) {
 	storage, mock := newTestPostgresStorage(t)
-	defer storage.Close()
+	defer func() { _ = storage.Close() }()
 
 	ctx := context.Background()
 	testTime := time.Now().Truncate(time.Second)
@@ -178,9 +179,9 @@ func TestPostgresStorage_Set(t *testing.T) {
 
 	t.Run("json marshal value error", func(t *testing.T) {
 		invalidPref := &userprefs.Preference{
-			UserID: "user1",
-			Key:    "baddata_value",
-			Value:  make(chan int), // Cannot be marshalled
+			UserID:       "user1",
+			Key:          "baddata_value",
+			Value:        make(chan int), // Cannot be marshalled
 			DefaultValue: "some default",
 		}
 		err := storage.Set(ctx, invalidPref)
@@ -190,9 +191,9 @@ func TestPostgresStorage_Set(t *testing.T) {
 
 	t.Run("json marshal default_value error", func(t *testing.T) {
 		invalidPref := &userprefs.Preference{
-			UserID: "user1",
-			Key:    "baddata_default_value",
-			Value:  "good value",
+			UserID:       "user1",
+			Key:          "baddata_default_value",
+			Value:        "good value",
 			DefaultValue: make(chan int), // Cannot be marshalled
 		}
 		err := storage.Set(ctx, invalidPref)
@@ -213,9 +214,42 @@ func TestPostgresStorage_Set(t *testing.T) {
 	})
 }
 
+func TestPostgresStorage_Set_Error(t *testing.T) {
+	storage, mock := newTestPostgresStorage(t)
+	defer func() { _ = storage.Close() }()
+
+	ctx := context.Background()
+	testTime := time.Now().Truncate(time.Second)
+	pref := &userprefs.Preference{
+		UserID:       "user1",
+		Key:          "theme",
+		Value:        "dark",
+		DefaultValue: "light", // Added DefaultValue
+		Type:         "string",
+		Category:     "appearance",
+		UpdatedAt:    testTime,
+	}
+	valueJSON, err := json.Marshal(pref.Value)
+	require.NoError(t, err)
+	defaultValueJSON, err := json.Marshal(pref.DefaultValue) // Added for DefaultValue
+	require.NoError(t, err)
+
+	t.Run("db exec error", func(t *testing.T) {
+		mock.ExpectExec(regexp.QuoteMeta(testInsertSQL)).
+			WithArgs(pref.UserID, pref.Key, valueJSON, defaultValueJSON, pref.Type, pref.Category, pref.UpdatedAt).
+			WillReturnError(errors.New("db exec error"))
+
+		err := storage.Set(ctx, pref)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "postgres: failed to execute insert/update for user 'user1', key 'theme'")
+		assert.Contains(t, err.Error(), "db exec error")
+		assert.NoError(t, mock.ExpectationsWereMet())
+	})
+}
+
 func TestPostgresStorage_Get(t *testing.T) {
 	storage, mock := newTestPostgresStorage(t)
-	defer storage.Close()
+	defer func() { _ = storage.Close() }()
 
 	ctx := context.Background()
 	userID := "user1"
@@ -303,9 +337,28 @@ func TestPostgresStorage_Get(t *testing.T) {
 	})
 }
 
+func TestPostgresStorage_Get_NotFound(t *testing.T) {
+	storage, mock := newTestPostgresStorage(t)
+	defer func() { _ = storage.Close() }()
+
+	ctx := context.Background()
+	userID := "user1"
+
+	t.Run("get not found", func(t *testing.T) {
+		mock.ExpectQuery(regexp.QuoteMeta(testSelectSQL)).
+			WithArgs(userID, "nonexistentkey").
+			WillReturnError(sql.ErrNoRows)
+
+		_, err := storage.Get(ctx, userID, "nonexistentkey")
+		assert.Error(t, err)
+		assert.True(t, errors.Is(err, userprefs.ErrNotFound), "Expected ErrNotFound, got %v", err)
+		assert.NoError(t, mock.ExpectationsWereMet())
+	})
+}
+
 func TestPostgresStorage_Delete(t *testing.T) {
 	storage, mock := newTestPostgresStorage(t)
-	defer storage.Close()
+	defer func() { _ = storage.Close() }()
 
 	ctx := context.Background()
 	userID := "user1"
@@ -356,20 +409,9 @@ func TestPostgresStorage_Delete(t *testing.T) {
 	})
 }
 
-func createMockPrefRows(t *testing.T, userID string, prefs ...*userprefs.Preference) *sqlmock.Rows {
-	rowNames := []string{"user_id", "key", "value", "type", "category", "updated_at"}
-	rows := sqlmock.NewRows(rowNames)
-	for _, p := range prefs {
-		valueJSON, err := json.Marshal(p.Value)
-		require.NoError(t, err)
-		rows.AddRow(p.UserID, p.Key, valueJSON, p.Type, p.Category, p.UpdatedAt)
-	}
-	return rows
-}
-
 func TestPostgresStorage_GetAll(t *testing.T) {
 	storage, mock := newTestPostgresStorage(t)
-	defer storage.Close()
+	defer func() { _ = storage.Close() }()
 
 	ctx := context.Background()
 	userID := "user1"
@@ -443,13 +485,13 @@ func TestPostgresStorage_GetAll(t *testing.T) {
 		assert.Contains(t, err.Error(), "db getall error")
 		assert.NoError(t, mock.ExpectationsWereMet())
 	})
-	
+
 	t.Run("getall rows scan error", func(t *testing.T) {
 		dummyDefaultValueJSON, err := json.Marshal("default")
 		require.NoError(t, err)
 		rowsWithError := sqlmock.NewRows([]string{"user_id", "key", "value", "default_value", "type", "category", "updated_at"}).
 			AddRow(userID, "key1", []byte(`"value1"`), dummyDefaultValueJSON, "string", "cat1", testTime)
-		rowsWithError.CloseError(errors.New("rows iteration error")) 
+		rowsWithError.CloseError(errors.New("rows iteration error"))
 
 		mock.ExpectQuery(regexp.QuoteMeta(testSelectAllSQL)).
 			WithArgs(userID).
@@ -457,7 +499,7 @@ func TestPostgresStorage_GetAll(t *testing.T) {
 
 		_, err = storage.GetAll(ctx, userID)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "postgres: error iterating preference rows") 
+		assert.Contains(t, err.Error(), "postgres: error iterating preference rows")
 		assert.NoError(t, mock.ExpectationsWereMet())
 	})
 
@@ -468,7 +510,7 @@ func TestPostgresStorage_GetAll(t *testing.T) {
 		defaultValue2JSON, _ := json.Marshal("default2")
 
 		mockRows := sqlmock.NewRows([]string{"user_id", "key", "value", "default_value", "type", "category", "updated_at"}).
-			AddRow(userID, "key1", validValue1JSON, defaultValue1JSON, "string", "cat1", testTime). 
+			AddRow(userID, "key1", validValue1JSON, defaultValue1JSON, "string", "cat1", testTime).
 			AddRow(userID, "key2", malformedValueJSON, defaultValue2JSON, "string", "cat2", testTime)
 
 		mock.ExpectQuery(regexp.QuoteMeta(testSelectAllSQL)).
@@ -490,7 +532,7 @@ func TestPostgresStorage_GetAll(t *testing.T) {
 
 		// For key2, value is valid, default_value is malformed.
 		mockRows := sqlmock.NewRows([]string{"user_id", "key", "value", "default_value", "type", "category", "updated_at"}).
-			AddRow(userID, "key1", validValue1JSON, validDefaultValue1JSON, "string", "cat1", testTime). 
+			AddRow(userID, "key1", validValue1JSON, validDefaultValue1JSON, "string", "cat1", testTime).
 			AddRow(userID, "key2", validValue2JSON, malformedDefaultValueJSON, "string", "cat2", testTime)
 
 		mock.ExpectQuery(regexp.QuoteMeta(testSelectAllSQL)).
@@ -507,7 +549,7 @@ func TestPostgresStorage_GetAll(t *testing.T) {
 
 func TestPostgresStorage_GetByCategory(t *testing.T) {
 	storage, mock := newTestPostgresStorage(t)
-	defer storage.Close()
+	defer func() { _ = storage.Close() }()
 
 	ctx := context.Background()
 	userID := "user1"
@@ -531,7 +573,7 @@ func TestPostgresStorage_GetByCategory(t *testing.T) {
 		mockRows := sqlmock.NewRows([]string{"user_id", "key", "value", "default_value", "type", "category", "updated_at"}).
 			AddRow(pref1.UserID, pref1.Key, pref1ValueJSON, pref1DefaultValueJSON, pref1.Type, pref1.Category, pref1.UpdatedAt).
 			AddRow(pref2.UserID, pref2.Key, pref2ValueJSON, pref2DefaultValueJSON, pref2.Type, pref2.Category, pref2.UpdatedAt)
-		
+
 		mock.ExpectQuery(regexp.QuoteMeta(testSelectByCategorySQL)).
 			WithArgs(userID, category).
 			WillReturnRows(mockRows)
@@ -581,7 +623,7 @@ func TestPostgresStorage_GetByCategory(t *testing.T) {
 		assert.Contains(t, err.Error(), "db getbycategory error")
 		assert.NoError(t, mock.ExpectationsWereMet())
 	})
-	
+
 	t.Run("getbycategory rows scan error", func(t *testing.T) {
 		dummyDefaultValueJSON, err := json.Marshal("default")
 		require.NoError(t, err)
@@ -606,8 +648,8 @@ func TestPostgresStorage_GetByCategory(t *testing.T) {
 		defaultValue2JSON, _ := json.Marshal("default2")
 
 		mockRows := sqlmock.NewRows([]string{"user_id", "key", "value", "default_value", "type", "category", "updated_at"}).
-			AddRow(userID, "key1", validValueJSON, defaultValue1JSON, "string", category, testTime). 
-			AddRow(userID, "key2", malformedValueJSON, defaultValue2JSON, "string", category, testTime)    
+			AddRow(userID, "key1", validValueJSON, defaultValue1JSON, "string", category, testTime).
+			AddRow(userID, "key2", malformedValueJSON, defaultValue2JSON, "string", category, testTime)
 
 		mock.ExpectQuery(regexp.QuoteMeta(testSelectByCategorySQL)).
 			WithArgs(userID, category).
@@ -626,7 +668,7 @@ func TestPostgresStorage_GetByCategory(t *testing.T) {
 		validDefaultValue1JSON, _ := json.Marshal("validDefault1")
 		// For key2, value is valid, default_value is malformed.
 		mockRows := sqlmock.NewRows([]string{"user_id", "key", "value", "default_value", "type", "category", "updated_at"}).
-			AddRow(userID, "key1", validValueJSON, validDefaultValue1JSON, "string", category, testTime). 
+			AddRow(userID, "key1", validValueJSON, validDefaultValue1JSON, "string", category, testTime).
 			AddRow(userID, "key2", validValueJSON, malformedDefaultValueJSON, "string", category, testTime)
 
 		mock.ExpectQuery(regexp.QuoteMeta(testSelectByCategorySQL)).

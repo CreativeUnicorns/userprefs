@@ -2,6 +2,7 @@ package userprefs
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -9,9 +10,10 @@ import (
 
 // MockStorage implements the Storage interface for testing
 type MockStorage struct {
-	mu     sync.RWMutex
-	data   map[string]map[string]*Preference
-	closed bool
+	mu               sync.RWMutex
+	data             map[string]map[string]*Preference
+	closed           bool
+	forceGetByCatErr error // For forcing errors in GetByCategory for testing
 }
 
 func NewMockStorage() *MockStorage {
@@ -80,10 +82,26 @@ func (m *MockStorage) GetAll(ctx context.Context, userID string) (map[string]*Pr
 		return nil, ErrStorageUnavailable
 	}
 
-	if userPrefs, exists := m.data[userID]; exists {
-		return userPrefs, nil
+	if userPrefs, exists := m.data[userID]; exists && len(userPrefs) > 0 {
+		copiedPrefs := make(map[string]*Preference, len(userPrefs))
+		for key, p := range userPrefs {
+			copiedP, err := deepCopyPreference(p) // Use the actual Preference type from the userprefs package
+			if err != nil {
+				return nil, fmt.Errorf("mockstorage: error deep copying preference %s for user %s: %w", key, userID, err)
+			}
+			copiedPrefs[key] = copiedP
+		}
+		return copiedPrefs, nil
 	}
-	return nil, ErrNotFound
+	// Return empty map instead of error when no preferences exist for the user
+	return make(map[string]*Preference), nil
+}
+
+// SetGetByCategoryError sets up an error to be returned by GetByCategory
+func (m *MockStorage) SetGetByCategoryError(err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.forceGetByCatErr = err
 }
 
 func (m *MockStorage) GetByCategory(ctx context.Context, userID, category string) (map[string]*Preference, error) {
@@ -95,18 +113,25 @@ func (m *MockStorage) GetByCategory(ctx context.Context, userID, category string
 		return nil, ErrStorageUnavailable
 	}
 
+	// Return forced error if set
+	if m.forceGetByCatErr != nil {
+		return nil, m.forceGetByCatErr
+	}
+
 	result := make(map[string]*Preference)
 	if userPrefs, exists := m.data[userID]; exists {
 		for key, pref := range userPrefs {
 			if pref.Category == category {
-				result[key] = pref
+				copiedP, err := deepCopyPreference(pref) // Use the actual Preference type
+				if err != nil {
+					return nil, fmt.Errorf("mockstorage: error deep copying preference %s for user %s (category %s): %w", pref.Key, userID, category, err)
+				}
+				result[key] = copiedP
 			}
 		}
 	}
 
-	if len(result) == 0 {
-		return nil, ErrNotFound
-	}
+	// Return empty map instead of error when no preferences exist for the category
 	return result, nil
 }
 
@@ -117,10 +142,58 @@ func (m *MockStorage) Close() error {
 	return nil
 }
 
+// deepCopyInterface performs a deep copy of an interface{} type by marshalling and unmarshalling it.
+// This is effective for JSON-compatible data types.
+func deepCopyInterface(data interface{}) (interface{}, error) {
+	if data == nil {
+		return nil, nil
+	}
+	bytes, err := json.Marshal(data)
+	if err != nil {
+		return nil, fmt.Errorf("deepCopyInterface: failed to marshal: %w", err)
+	}
+	var copiedData interface{}
+	if err := json.Unmarshal(bytes, &copiedData); err != nil {
+		return nil, fmt.Errorf("deepCopyInterface: failed to unmarshal: %w", err)
+	}
+	return copiedData, nil
+}
+
+// deepCopyPreference creates a deep copy of a Preference object.
+// Note: This function should use the actual Preference type from the userprefs package.
+// For this example, it's assumed to be userprefs.Preference.
+func deepCopyPreference(original *Preference) (*Preference, error) {
+	if original == nil {
+		return nil, nil
+	}
+
+	copiedValue, err := deepCopyInterface(original.Value)
+	if err != nil {
+		return nil, fmt.Errorf("failed to deep copy Value for key %s: %w", original.Key, err)
+	}
+
+	copiedDefaultValue, err := deepCopyInterface(original.DefaultValue)
+	if err != nil {
+		return nil, fmt.Errorf("failed to deep copy DefaultValue for key %s: %w", original.Key, err)
+	}
+
+	// Create a new Preference struct and copy values.
+	// For time.Time, direct assignment is a copy of the value.
+	return &Preference{
+		UserID:       original.UserID,
+		Key:          original.Key,
+		Value:        copiedValue,
+		DefaultValue: copiedDefaultValue,
+		Type:         original.Type,
+		Category:     original.Category,
+		UpdatedAt:    original.UpdatedAt, // time.Time is a struct, direct assignment copies its value.
+	}, nil
+}
+
 // mockCacheEntry holds a value and an error for a cache key.
 // This allows tests to pre-configure specific return values and errors for MockCache.Get.
 type mockCacheEntry struct {
-	value interface{}
+	value []byte
 	err   error
 }
 
@@ -141,7 +214,7 @@ func NewMockCache() *MockCache {
 // Get retrieves a value from the mock cache. It returns the pre-configured value and error
 // for the key if an entry exists. If an error is set in the entry, that error is returned.
 // If the key is not found, it returns (nil, ErrNotFound).
-func (m *MockCache) Get(ctx context.Context, key string) (interface{}, error) {
+func (m *MockCache) Get(ctx context.Context, key string) ([]byte, error) {
 	_, _ = ctx.Deadline()
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -165,7 +238,7 @@ func (m *MockCache) Get(ctx context.Context, key string) (interface{}, error) {
 // Set stores a value in the mock cache. It wraps the value in a mockCacheEntry.
 // To simulate Set returning an error, the 'closed' flag can be used, or this method
 // could be extended if more complex error simulations for Set are needed.
-func (m *MockCache) Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error {
+func (m *MockCache) Set(ctx context.Context, key string, value []byte, ttl time.Duration) error {
 	_, _ = ctx.Deadline()
 	_ = ttl // TTL is ignored in this mock implementation
 
@@ -230,10 +303,18 @@ func (m *MockLogger) Warn(msg string, args ...interface{}) {
 	m.Messages = append(m.Messages, formatMessage("WARN", msg, args...))
 }
 
-func (m *MockLogger) Error(msg string, args ...interface{}) {
+func (m *MockLogger) Error(msg string, args ...any) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.Messages = append(m.Messages, formatMessage("ERROR", msg, args...))
+	m.Messages = append(m.Messages, fmt.Sprintf("ERROR: "+msg, args...))
+}
+
+// SetLevel is a mock implementation of the SetLevel method.
+// It records the attempt to set the log level for test verification.
+func (m *MockLogger) SetLevel(level LogLevel) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.Messages = append(m.Messages, fmt.Sprintf("SET_LEVEL: %v", level))
 }
 
 func formatMessage(level, msg string, args ...interface{}) string {

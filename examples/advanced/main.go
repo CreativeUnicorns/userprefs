@@ -32,7 +32,7 @@ var (
 
 func main() {
 	// Initialize PostgreSQL storage (used for the main part of the example)
-	pgStore, err := storage.NewPostgresStorage("postgres://userprefs_user:userprefs_password@localhost:5432/userprefs_db?sslmode=disable")
+	pgStore, err := storage.NewPostgresStorage(storage.WithPostgresDSN("postgres://userprefs_user:userprefs_password@localhost:5432/userprefs_db?sslmode=disable"))
 	if err != nil {
 		log.Printf("Failed to initialize PostgreSQL storage: %v. Main demo may use MemoryStorage.", err)
 		// Allow example to continue with memory storage for other parts if PG fails
@@ -46,7 +46,7 @@ func main() {
 	}
 
 	// Initialize Redis cache (used for the main part of the example)
-	actualRedisCache, err := cache.NewRedisCache("localhost:6379", "", 0)
+	actualRedisCache, err := cache.NewRedisCache(cache.WithRedisAddress("localhost:6379"), cache.WithRedisPassword(""), cache.WithRedisDB(0))
 	if err != nil {
 		log.Printf("Redis cache not available: %v. Main demo may use MemoryCache or no cache.", err)
 		// actualRedisCache will be nil, appCache will not be set here
@@ -290,7 +290,9 @@ func demonstrateDefaultAndCacheErrorHandling(ctx context.Context) {
 	neverSetPrefDef := userprefs.PreferenceDefinition{
 		Key: neverSetPrefKey, Type: "string", DefaultValue: "default_for_never_set", Category: "demo_extra",
 	}
-	if err := mgr.DefinePreference(neverSetPrefDef); err != nil { log.Fatalf("Failed to define %s: %v", neverSetPrefKey, err); }
+	if err := mgr.DefinePreference(neverSetPrefDef); err != nil {
+		log.Fatalf("Failed to define %s: %v", neverSetPrefKey, err)
+	}
 
 	log.Printf("Fetching '%s' for user '%s' (never set, simulating path that leads to default)...", neverSetPrefKey, userID)
 	pref, err = mgr.Get(ctx, userID, neverSetPrefKey)

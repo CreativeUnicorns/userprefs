@@ -4,38 +4,52 @@ package cache
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/CreativeUnicorns/userprefs"
 )
 
-// item represents a single cache item with a value and an expiration time.
+// item represents a single cache item with a value (as a byte slice) and an expiration time.
 type item struct {
-	value      interface{}
+	value      []byte
 	expiration time.Time
 }
 
-// MemoryCache implements the Cache interface using an in-memory store.
+// MemoryCache implements the userprefs.Cache interface using an in-memory map.
+// It provides a thread-safe caching mechanism with support for item expiration and
+// automatic garbage collection of expired items.
+// All operations are protected by an internal sync.RWMutex.
 type MemoryCache struct {
-	mu    sync.RWMutex
-	items map[string]item
-	stop  chan struct{} // Channel to signal gc goroutine to stop
+	mu     sync.RWMutex
+	items  map[string]item
+	stop   chan struct{} // Channel to signal gc goroutine to stop
+	once   sync.Once     // Ensures stop channel is closed and items are cleared only once
+	closed atomic.Bool   // Flag to indicate if the cache is closed (atomic for lock-free reads)
 }
 
-// NewMemoryCache initializes a new MemoryCache instance.
-// It starts a garbage collection goroutine to clean expired items.
+// NewMemoryCache initializes and returns a new MemoryCache instance.
+// It also starts a background goroutine that periodically scans for and removes expired items
+// from the cache. This goroutine is stopped when the Close method is called.
 func NewMemoryCache() *MemoryCache {
 	cache := &MemoryCache{
 		items: make(map[string]item),
 		stop:  make(chan struct{}),
 	}
+	// closed is initialized to false by default (atomic.Bool zero value is false)
 	go cache.gc()
 	return cache
 }
 
-// Get retrieves a value from the memory cache by key.
-// It returns an error if the key does not exist or has expired.
-func (c *MemoryCache) Get(_ context.Context, key string) (interface{}, error) {
+// Get retrieves an item from the memory cache by its key.
+// The 'ctx' parameter is present for interface compliance but is not used in this implementation.
+// It returns the cached item as a byte slice ([]byte) and nil error if the key is found and not expired.
+// If the key does not exist or if the item has expired, it returns nil for the byte slice and
+// userprefs.ErrNotFound from the parent package.
+func (c *MemoryCache) Get(_ context.Context, key string) ([]byte, error) {
+	if c.isClosed() {
+		return nil, userprefs.ErrCacheClosed
+	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -55,9 +69,21 @@ func (c *MemoryCache) Get(_ context.Context, key string) (interface{}, error) {
 	return it.value, nil
 }
 
-// Set stores a value in the memory cache with an optional TTL.
-// If TTL is greater than zero, the key will expire after the duration.
-func (c *MemoryCache) Set(_ context.Context, key string, value interface{}, ttl time.Duration) error {
+// Set adds an item (as a byte slice) to the memory cache with the given key, applying an optional TTL.
+// The 'ctx' parameter is present for interface compliance but is not used in this implementation.
+// The 'value' parameter must be a byte slice.
+// If 'ttl' (time-to-live) is greater than zero, the item will be marked for expiration after that duration.
+// If 'ttl' is zero or negative, the item will not expire (it will persist until explicitly deleted or the cache is closed).
+// This method currently always returns nil error.
+func (c *MemoryCache) Set(_ context.Context, key string, value []byte, ttl time.Duration) error {
+	if c.isClosed() {
+		return userprefs.ErrCacheClosed
+	}
+
+	// Defensive copy *before* we lock.
+	copiedValue := make([]byte, len(value))
+	copy(copiedValue, value)
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -65,17 +91,18 @@ func (c *MemoryCache) Set(_ context.Context, key string, value interface{}, ttl 
 	if ttl > 0 {
 		expiration = time.Now().Add(ttl)
 	}
-
-	c.items[key] = item{
-		value:      value,
-		expiration: expiration,
-	}
-
+	c.items[key] = item{value: copiedValue, expiration: expiration}
 	return nil
 }
 
-// Delete removes a key from the memory cache.
+// Delete removes an item from the memory cache by its key.
+// The 'ctx' parameter is present for interface compliance but is not used in this implementation.
+// This operation is idempotent: if the key does not exist, it does nothing and returns nil error.
+// This method currently always returns nil error.
 func (c *MemoryCache) Delete(_ context.Context, key string) error {
+	if c.isClosed() {
+		return userprefs.ErrCacheClosed
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -83,17 +110,28 @@ func (c *MemoryCache) Delete(_ context.Context, key string) error {
 	return nil
 }
 
-// Close clears all items from the memory cache.
+// Close stops the background garbage collection goroutine and clears all items from the memory cache.
+// This method should be called when the MemoryCache is no longer needed to free resources.
+// It effectively resets the cache to an empty state.
+// This method currently always returns nil error.
 func (c *MemoryCache) Close() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.once.Do(func() {
+		c.mu.Lock()
+		// Signal the gc goroutine to stop.
+		// This is safe to do only once thanks to c.once.
+		close(c.stop)
 
-	// Signal the gc goroutine to stop
-	// Ensure this is done before clearing items if gc also accesses items
-	close(c.stop)
-
-	c.items = make(map[string]item) // Clear items
+		// Clear items to reset the cache state.
+		c.items = make(map[string]item)
+		c.closed.Store(true) // Set the closed flag atomically
+		c.mu.Unlock()
+	})
 	return nil
+}
+
+// isClosed checks if the cache has been closed.
+func (c *MemoryCache) isClosed() bool {
+	return c.closed.Load()
 }
 
 // gc runs a garbage collection process that periodically removes expired items.
@@ -104,11 +142,11 @@ func (c *MemoryCache) gc() {
 	for {
 		select {
 		case <-ticker.C:
-		c.mu.Lock()
-		for key, it := range c.items {
-			if !it.expiration.IsZero() && time.Now().After(it.expiration) {
-				delete(c.items, key)
-			}
+			c.mu.Lock()
+			for key, it := range c.items {
+				if !it.expiration.IsZero() && time.Now().After(it.expiration) {
+					delete(c.items, key)
+				}
 			}
 			c.mu.Unlock()
 		case <-c.stop:

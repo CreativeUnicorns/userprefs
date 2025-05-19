@@ -23,7 +23,7 @@ coverage: ## Run tests with coverage
 	go tool cover -html=coverage.txt
 
 lint: ## Run linters
-	golangci-lint run  --exclude-dirs examples 2>&1
+	golangci-lint run 2>&1
 
 security: ## Run security scan
 	gosec -quiet ./... 2>&1
@@ -35,8 +35,8 @@ clean: ## Clean build artifacts
 	go clean
 	rm -f coverage.txt
 	rm -f userprefs
-	echo rm -f preferences.db
-	echo rm -f sqlite-advanced.db
+	rm -f preferences.db
+	rm -f sqlite-advanced.db
 
 examples: ## Build example applications
 	go build -v ./examples/...

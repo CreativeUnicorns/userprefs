@@ -1,23 +1,69 @@
-linters:
-  enable:
-    - revive # Replacing deprecated golint
-    - gofmt
-    - govet
-    - errcheck
-    - staticcheck
-    - gosimple
-    - ineffassign
-    - unconvert
-    - misspell
-    - goimports
-    - prealloc
-    - gosec
+version: "2"
+
+run:
+  # default concurrency is GOMAXPROCS
+  # concurrency: 4
+  # timeout for analysis, e.g. 30s, 5m, default is 1m
+  timeout: 5m
+  # exit code when at least one issue was found, default is 1
+  issues-exit-code: 1
+  # include test files or not, default is true
+  tests: true
+  # list of build tags, all linters use it.
+  # build-tags:
+  #   - mytag
+  # which files to skip: they will be analyzed, but issues from them
+  # won't be reported. Default is empty list.
+  # It doesn't skip tests, syntax tree parsing and analysis of such files.
+  skip-files:
+    - "examples/.*"
+  # which directories to skip: they will not be analyzed completely.
+  # Default is empty list.
+  skip-dirs:
+    - examples
+    - vendor # It's common to skip vendor directory
 
 linters-settings:
+  errcheck:
+    # report about not checking of errors in type assetions: `a := b.(MyStruct)`;
+    # default is false: such cases aren't reported by default.
+    check-type-assertions: true
+    # report about assignment of errors to blank identifier: `num, _ := strconv.Atoi(numStr)`;
+    # default is false: such cases aren't reported by default.
+    check-blank: true
+    # Exclude checking errors in test files.
+    # This is a common pattern as test helpers often ignore errors for brevity.
+    exclude-functions:
+      - testing.T.Fatalf
+      - testing.T.Errorf
+      - testing.T.Skipf
+      - (github.com/stretchr/testify/require|github.com/stretchr/testify/assert).NoError
+      - (github.com/stretchr/testify/require|github.com/stretchr/testify/assert).Error
+  govet:
+    # report about shadowed variables
+    check-shadowing: true
+  revive:
+    ignore-generated-header: true
+    severity: "warning"
+    confidence: 0.8
+    errorCode: 0
+    warningCode: 0
+    rules:
+      - name: package-comments
+      - name: exported
   goimports:
     local-prefixes: github.com/CreativeUnicorns/userprefs
 
-issues:
-  exclude-use-default: false
-  max-issues-per-linter: 0
-  max-same-issues: 0
+linters:
+  disable-all: true
+  enable:
+    - revive
+    - govet
+    - errcheck
+    - staticcheck
+    - ineffassign
+    - unconvert
+    - misspell
+    - prealloc
+    - gosec
+    - unused

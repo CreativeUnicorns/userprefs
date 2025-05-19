@@ -18,6 +18,12 @@ var ErrInvalidValue = errors.New("invalid preference value")
 // ErrNotFound indicates that the requested preference was not found.
 var ErrNotFound = errors.New("preference not found")
 
+// ErrValidation indicates that a preference value failed a validation check.
+var ErrValidation = errors.New("preference validation failed")
+
+// ErrCacheClosed indicates that an operation was attempted on a cache that has been closed.
+var ErrCacheClosed = errors.New("cache is closed")
+
 // ErrPreferenceNotDefined indicates that the preference has not been defined in the system.
 var ErrPreferenceNotDefined = errors.New("preference not defined")
 

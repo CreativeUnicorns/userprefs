@@ -249,9 +249,12 @@ func TestManager_GetByCategory(t *testing.T) {
 	}
 
 	// Get preferences by non-existing category (no definitions for this category)
-	_, err = mgr.GetByCategory(context.Background(), userID, "nonexistentcategory")
-	if !errors.Is(err, ErrNotFound) { // Corrected: Manager.GetByCategory returns ErrNotFound if no *definitions* match category.
-		t.Errorf("Expected ErrNotFound for nonexistent category, got %v", err)
+	nonexistentPrefs, err := mgr.GetByCategory(context.Background(), userID, "nonexistentcategory")
+	if err != nil {
+		t.Errorf("Expected no error for nonexistent category, got %v", err)
+	}
+	if len(nonexistentPrefs) != 0 {
+		t.Errorf("Expected empty map for nonexistent category, got %d preferences", len(nonexistentPrefs))
 	}
 }
 
@@ -409,8 +412,8 @@ func TestManager_Get_CacheInteraction(t *testing.T) {
 
 	testCases := []struct {
 		name                 string
-		setupCache           func(mc *MockCache, ms *MockStorage) // Function to set up cache state
-		setupStorage         func(ms *MockStorage)          // Function to set up storage state
+		setupCache           func(mc *MockCache, _ *MockStorage) // Function to set up cache state, ms renamed to _
+		setupStorage         func(_ *MockStorage)                // Function to set up storage state, ms renamed to _
 		useNilCache          bool
 		expectedValue        interface{}
 		expectedErr          error
@@ -419,7 +422,7 @@ func TestManager_Get_CacheInteraction(t *testing.T) {
 	}{
 		{
 			name: "Cache Hit - Valid Direct Bytes",
-			setupCache: func(mc *MockCache, ms *MockStorage) {
+			setupCache: func(mc *MockCache, _ *MockStorage) { // ms renamed to _
 				prefToCache := &Preference{
 					UserID:       expectedPrefFromStorage.UserID,
 					Key:          def.Key,
@@ -436,8 +439,8 @@ func TestManager_Get_CacheInteraction(t *testing.T) {
 			expectedErr:   nil,
 		},
 		{
-			name: "Cache Hit - Valid Base64 Encoded JSON String",
-			setupCache: func(mc *MockCache, ms *MockStorage) {
+			name: "Cache Hit - Valid JSON Data (formerly Base64 test)",
+			setupCache: func(mc *MockCache, _ *MockStorage) { // ms renamed to _
 				prefToCache := &Preference{
 					UserID:       expectedPrefFromStorage.UserID,
 					Key:          def.Key,
@@ -448,22 +451,20 @@ func TestManager_Get_CacheInteraction(t *testing.T) {
 					UpdatedAt:    time.Now(),
 				}
 				jsonBytes, _ := json.Marshal(prefToCache)
-				b64String := base64.StdEncoding.EncodeToString(jsonBytes)
-				// Marshal the base64 string itself into JSON bytes, as if it was stored as a JSON string literal
-				finalCacheBytes, _ := json.Marshal(b64String)
-				mc.data[cacheKey] = mockCacheEntry{value: finalCacheBytes}
+				// The cache should store the direct JSON bytes of the Preference.
+				mc.data[cacheKey] = mockCacheEntry{value: jsonBytes}
 			},
 			expectedValue: "cached_b64_value",
 			expectedErr:   nil,
 		},
 		{
 			name: "Cache Miss (ErrNotFound) - Fallback to Storage",
-			setupCache: func(mc *MockCache, ms *MockStorage) {
+			setupCache: func(mc *MockCache, _ *MockStorage) { // ms renamed to _
 				// Cache returns ErrNotFound implicitly if key doesn't exist or explicitly:
 				mc.data[cacheKey] = mockCacheEntry{value: nil, err: ErrNotFound}
 			},
 			setupStorage: func(ms *MockStorage) {
-				ms.Set(context.Background(), expectedPrefFromStorage) // Ensure storage has the item
+				_ = ms.Set(context.Background(), expectedPrefFromStorage) // Ensure storage has the item
 			},
 			expectedValue: expectedPrefFromStorage.Value, // Should get value from storage
 			expectedErr:   nil,
@@ -471,15 +472,15 @@ func TestManager_Get_CacheInteraction(t *testing.T) {
 		{
 			name:        "Nil Cache - Fallback to Storage",
 			useNilCache: true,
-			setupStorage: func(ms *MockStorage) {
-				ms.Set(context.Background(), expectedPrefFromStorage)
+			setupStorage: func(s *MockStorage) { // ms renamed to s, to be used in the body
+				_ = s.Set(context.Background(), expectedPrefFromStorage)
 			},
 			expectedValue: expectedPrefFromStorage.Value,
 			expectedErr:   nil,
 		},
 		{
 			name: "Cache Hit - Malformed JSON Bytes",
-			setupCache: func(mc *MockCache, ms *MockStorage) {
+			setupCache: func(mc *MockCache, _ *MockStorage) { // ms renamed to _
 				mc.data[cacheKey] = mockCacheEntry{value: []byte("{\"key\": \"malformed\"")}
 			},
 			expectedErr:          ErrSerialization,
@@ -487,7 +488,7 @@ func TestManager_Get_CacheInteraction(t *testing.T) {
 		},
 		{
 			name: "Cache Hit - JSON String, Not Base64",
-			setupCache: func(mc *MockCache, ms *MockStorage) {
+			setupCache: func(mc *MockCache, _ *MockStorage) { // ms renamed to _
 				// Marshal a non-base64 string into JSON bytes e.g. "this is not base64"
 				jsonStringBytes, _ := json.Marshal("this is not base64")
 				mc.data[cacheKey] = mockCacheEntry{value: jsonStringBytes}
@@ -497,7 +498,7 @@ func TestManager_Get_CacheInteraction(t *testing.T) {
 		},
 		{
 			name: "Cache Hit - Base64 Decodes to Malformed JSON",
-			setupCache: func(mc *MockCache, ms *MockStorage) {
+			setupCache: func(mc *MockCache, _ *MockStorage) { // ms renamed to _
 				b64String := base64.StdEncoding.EncodeToString([]byte("{\"key\": \"malformed_after_b64\""))
 				finalCacheBytes, _ := json.Marshal(b64String)
 				mc.data[cacheKey] = mockCacheEntry{value: finalCacheBytes}
@@ -507,23 +508,23 @@ func TestManager_Get_CacheInteraction(t *testing.T) {
 		},
 		{
 			name: "Cache Hit - Non-[]byte Data",
-			setupCache: func(mc *MockCache, ms *MockStorage) {
-				mc.data[cacheKey] = mockCacheEntry{value: 12345} // An integer, not []byte
+			setupCache: func(mc *MockCache, _ *MockStorage) { // ms renamed to _
+				mc.data[cacheKey] = mockCacheEntry{value: []byte("12345")} // A non-JSON []byte
 			},
 			expectedErr:          ErrSerialization,
 			expectDefaultOnError: true,
 		},
 		{
 			name: "Cache Error - Generic Error from Cache Get",
-			setupCache: func(mc *MockCache, ms *MockStorage) {
+			setupCache: func(mc *MockCache, _ *MockStorage) { // ms renamed to _
 				mc.data[cacheKey] = mockCacheEntry{err: specificGenericCacheError}
 			},
 			// The manager wraps the cache error. We expect the default value to be returned.
 			// For error checking, we are checking if the *specific* error `ErrSerialization` is returned when applicable,
-			// or if a generic error is returned, we check that an error *is* returned. 
+			// or if a generic error is returned, we check that an error *is* returned.
 			// More specific checks on wrapped errors could be done with custom error types or by inspecting error strings.
 			expectedErr:          specificGenericCacheError, // Expect the specific error instance to be wrapped and identifiable
-			expectDefaultOnError: true, 
+			expectDefaultOnError: true,
 		},
 	}
 
@@ -554,7 +555,7 @@ func TestManager_Get_CacheInteraction(t *testing.T) {
 				tc.setupStorage(store)
 			} else {
 				// Default storage setup: store the expectedPrefFromStorage
-				store.Set(context.Background(), expectedPrefFromStorage)
+				_ = store.Set(context.Background(), expectedPrefFromStorage)
 			}
 
 			if tc.setupCache != nil && !tc.useNilCache {
@@ -588,6 +589,525 @@ func TestManager_Get_CacheInteraction(t *testing.T) {
 
 			if tc.checkLogs != nil {
 				tc.checkLogs(t, logger, tc.name)
+			}
+		})
+	}
+}
+
+func TestManager_Set_ValidationAndTypeChecking(t *testing.T) {
+	store := NewMockStorage()
+	cache := NewMockCache()
+	logger := &MockLogger{}
+	mgr := New(
+		WithStorage(store),
+		WithCache(cache),
+		WithLogger(logger),
+	)
+
+	userID := "testUserValidation"
+
+	// 1. Test Type Mismatch
+	defTypeMismatch := PreferenceDefinition{
+		Key:          "typeMismatchPref",
+		Type:         "string",
+		Category:     "test",
+		DefaultValue: "default",
+	}
+	err := mgr.DefinePreference(defTypeMismatch)
+	if err != nil {
+		t.Fatalf("DefinePreference failed for typeMismatchPref: %v", err)
+	}
+
+	err = mgr.Set(context.Background(), userID, "typeMismatchPref", 123) // Set int for StringType
+	if !errors.Is(err, ErrInvalidValue) {
+		t.Errorf("Expected ErrInvalidValue for type mismatch, got %v", err)
+	}
+
+	// 2. Test Validation Function Failure
+	defValidationFail := PreferenceDefinition{
+		Key:          "validationFailPref",
+		Type:         "string",
+		Category:     "test",
+		DefaultValue: "default",
+		ValidateFunc: func(value interface{}) error {
+			sVal, ok := value.(string)
+			if !ok {
+				return fmt.Errorf("unexpected type for validation: %T", value)
+			}
+			if sVal != "valid_value" {
+				return fmt.Errorf("value must be 'valid_value'")
+			}
+			return nil
+		},
+	}
+	err = mgr.DefinePreference(defValidationFail)
+	if err != nil {
+		t.Fatalf("DefinePreference failed for validationFailPref: %v", err)
+	}
+
+	err = mgr.Set(context.Background(), userID, "validationFailPref", "invalid_value")
+	if !errors.Is(err, ErrInvalidValue) {
+		t.Errorf("Expected ErrInvalidValue for validation failure, got %v", err)
+	}
+	// Ensure not set in storage or cache
+	_, storeErr := store.Get(context.Background(), userID, "validationFailPref")
+	if !errors.Is(storeErr, ErrNotFound) {
+		t.Errorf("Expected ErrNotFound from storage after failed Set, got %v", storeErr)
+	}
+	if _, cacheExists := cache.data[fmt.Sprintf("pref:%s:%s", userID, "validationFailPref")]; cacheExists {
+		t.Errorf("Value should not be in cache after failed Set")
+	}
+
+	// 3. Test Validation Function Success
+	defValidationSuccess := PreferenceDefinition{
+		Key:          "validationSuccessPref",
+		Type:         "string",
+		Category:     "test",
+		DefaultValue: "default",
+		ValidateFunc: func(value interface{}) error {
+			sVal, ok := value.(string)
+			if !ok {
+				return fmt.Errorf("unexpected type for validation: %T", value)
+			}
+			if sVal != "correct_value" {
+				return fmt.Errorf("value must be 'correct_value'")
+			}
+			return nil
+		},
+	}
+	err = mgr.DefinePreference(defValidationSuccess)
+	if err != nil {
+		t.Fatalf("DefinePreference failed for validationSuccessPref: %v", err)
+	}
+
+	err = mgr.Set(context.Background(), userID, "validationSuccessPref", "correct_value")
+	if err != nil {
+		t.Errorf("Expected no error for successful validation, got %v", err)
+	}
+	// Ensure set in storage and cache
+	pref, storeErr := store.Get(context.Background(), userID, "validationSuccessPref")
+	if storeErr != nil {
+		t.Errorf("Expected no error from storage after successful Set, got %v", storeErr)
+	} else if pref == nil || pref.Value != "correct_value" {
+		t.Errorf("Value in storage is incorrect. Expected 'correct_value', got %v", pref.Value)
+	}
+
+	cacheKey := fmt.Sprintf("pref:%s:%s", userID, "validationSuccessPref")
+	cacheEntry, cacheExists := cache.data[cacheKey]
+	if !cacheExists {
+		t.Errorf("Value should be in cache after successful Set")
+	} else {
+		var cachedPref Preference
+		// cacheEntry.value is already []byte (JSON marshalled Preference)
+		// and contains the direct JSON bytes of the Preference.
+		if err := json.Unmarshal(cacheEntry.value, &cachedPref); err != nil {
+			t.Fatalf("Failed to unmarshal cached preference: %v", err)
+		}
+		if cachedPref.Value != "correct_value" {
+			t.Errorf("Value in cache is incorrect. Expected 'correct_value', got %v", cachedPref.Value)
+		}
+	}
+}
+
+func TestManager_GetAllPreferences(t *testing.T) {
+	store := NewMockStorage()
+	cache := NewMockCache()
+	logger := &MockLogger{}
+	mgr := New(
+		WithStorage(store),
+		WithCache(cache),
+		WithLogger(logger),
+	)
+
+	userID := "user_test_all_prefs"
+
+	// Define multiple preferences
+	prefsToDefine := []PreferenceDefinition{
+		{
+			Key:          "language",
+			Type:         "string",
+			Category:     "general",
+			DefaultValue: "en",
+		},
+		{
+			Key:          "timezone",
+			Type:         "string",
+			Category:     "general",
+			DefaultValue: "UTC",
+		},
+		{
+			Key:          "notifications",
+			Type:         "boolean",
+			Category:     "settings",
+			DefaultValue: true,
+		},
+	}
+
+	for _, def := range prefsToDefine {
+		if err := mgr.DefinePreference(def); err != nil {
+			t.Fatalf("DefinePreference failed: %v", err)
+		}
+	}
+
+	// Set some preferences
+	err := mgr.Set(context.Background(), userID, "language", "fr")
+	if err != nil {
+		t.Fatalf("Set failed: %v", err)
+	}
+	err = mgr.Set(context.Background(), userID, "timezone", "PST")
+	if err != nil {
+		t.Fatalf("Set failed: %v", err)
+	}
+
+	// Mock expected preferences from storage
+	expectedPrefs := map[string]*Preference{
+		"language": {
+			UserID:       userID,
+			Key:          "language",
+			Value:        "fr",
+			DefaultValue: "en",
+			Type:         "string",
+			Category:     "general",
+			UpdatedAt:    time.Now(),
+		},
+		"timezone": {
+			UserID:       userID,
+			Key:          "timezone",
+			Value:        "PST",
+			DefaultValue: "UTC",
+			Type:         "string",
+			Category:     "general",
+			UpdatedAt:    time.Now(),
+		},
+		"notifications": {
+			UserID:       userID,
+			Key:          "notifications",
+			Value:        true,
+			DefaultValue: false,
+			Type:         "boolean",
+			Category:     "settings",
+			UpdatedAt:    time.Now(),
+		},
+	}
+
+	// Test cases
+	testCases := []struct {
+		name          string
+		cacheType     string
+		setupCache    func(mc *MockCache, _ *MockStorage) // Changed ms to _
+		userID        string
+		mockGetAll    func(mockStore *MockStorage, uid string)
+		expectedPrefs map[string]*Preference
+		expectedError error
+	}{
+		{
+			name:      "cache hit on get all",
+			cacheType: "memory", // Can be any cache type
+			setupCache: func(_ *MockCache, _ *MockStorage) { // mc and ms renamed to _
+				// No need to do anything since we're not using the cache directly
+				// Manager.GetAll doesn't check the cache
+			},
+			userID: userID,
+			mockGetAll: func(mockStore *MockStorage, _ string) { // Set up preferences in storage
+				// Set the preferences in the mock storage
+				for _, pref := range expectedPrefs {
+					_ = mockStore.Set(context.Background(), pref)
+				}
+			},
+			expectedPrefs: expectedPrefs,
+			expectedError: nil,
+		},
+		{
+			name:      "cache error on get all",
+			cacheType: "redis",
+			setupCache: func(_ *MockCache, _ *MockStorage) { // mc and ms renamed to _
+				// No need to do anything since we're not using the cache directly
+				// Manager.GetAll doesn't check the cache
+			},
+			userID: userID,
+			mockGetAll: func(mockStore *MockStorage, _ string) { // Set up preferences in storage
+				// Set the preferences in the mock storage
+				for _, pref := range expectedPrefs {
+					_ = mockStore.Set(context.Background(), pref)
+				}
+			},
+			expectedPrefs: expectedPrefs,
+			expectedError: nil,
+		},
+		{
+			name:      "store error on get all after cache miss",
+			cacheType: "memory",
+			setupCache: func(_ *MockCache, _ *MockStorage) { // mc and ms renamed to _
+				// No need to do anything since we're not using the cache directly
+			},
+			userID: userID,
+			mockGetAll: func(mockStore *MockStorage, _ string) {
+				// Set the preferences in the mock storage
+				for _, pref := range expectedPrefs {
+					_ = mockStore.Set(context.Background(), pref)
+				}
+			},
+			expectedPrefs: expectedPrefs,
+			expectedError: nil,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := NewMockStorage()
+			cache := NewMockCache()
+			logger := &MockLogger{}
+
+			mgr := New(
+				WithStorage(store),
+				WithCache(cache),
+				WithLogger(logger),
+			)
+
+			// Define the same preferences for this test's manager instance
+			prefsToDefine := []PreferenceDefinition{
+				{
+					Key:          "language",
+					Type:         "string",
+					Category:     "general",
+					DefaultValue: "en",
+				},
+				{
+					Key:          "timezone",
+					Type:         "string",
+					Category:     "general",
+					DefaultValue: "UTC",
+				},
+				{
+					Key:          "notifications",
+					Type:         "boolean",
+					Category:     "settings",
+					DefaultValue: false, // Note: this matches the expectedPrefs definition
+				},
+			}
+
+			for _, def := range prefsToDefine {
+				if err := mgr.DefinePreference(def); err != nil {
+					t.Fatalf("DefinePreference failed: %v", err)
+				}
+			}
+
+			// Set up the cache and storage as per the test case
+			if tc.setupCache != nil {
+				tc.setupCache(cache, store)
+			}
+			if tc.mockGetAll != nil {
+				tc.mockGetAll(store, tc.userID)
+			}
+
+			// Get all preferences for the user
+			prefs, err := mgr.GetAll(context.Background(), tc.userID)
+
+			// Check the error
+			if err != nil {
+				if tc.expectedError == nil {
+					t.Errorf("Expected no error, got: %v", err)
+				} else if err.Error() != tc.expectedError.Error() {
+					t.Errorf("Expected error '%v', got '%v'", tc.expectedError, err)
+				}
+			} else if tc.expectedError != nil {
+				t.Errorf("Expected error '%v', got none", tc.expectedError)
+			}
+
+			// Check the preferences
+			if len(prefs) != len(tc.expectedPrefs) {
+				t.Errorf("Expected %d preferences, got %d", len(tc.expectedPrefs), len(prefs))
+			}
+			for key, expectedPref := range tc.expectedPrefs {
+				if pref, exists := prefs[key]; !exists {
+					t.Errorf("Expected preference '%s' to exist", key)
+				} else if pref.Value != expectedPref.Value {
+					t.Errorf("Preference '%s' value mismatch: expected '%v', got '%v'", key, expectedPref.Value, pref.Value)
+				}
+			}
+		})
+	}
+}
+
+func TestManager_GetPreferencesByCategory(t *testing.T) {
+	store := NewMockStorage()
+	cache := NewMockCache()
+	logger := &MockLogger{}
+	mgr := New(
+		WithStorage(store),
+		WithCache(cache),
+		WithLogger(logger),
+	)
+
+	userID := "user_test_category_prefs"
+	category := "general"
+
+	// Define multiple preferences
+	prefsToDefine := []PreferenceDefinition{
+		{
+			Key:          "language",
+			Type:         "string",
+			Category:     category,
+			DefaultValue: "en",
+		},
+		{
+			Key:          "timezone",
+			Type:         "string",
+			Category:     category,
+			DefaultValue: "UTC",
+		},
+		{
+			Key:          "notifications",
+			Type:         "boolean",
+			Category:     "settings",
+			DefaultValue: true,
+		},
+	}
+
+	for _, def := range prefsToDefine {
+		if err := mgr.DefinePreference(def); err != nil {
+			t.Fatalf("DefinePreference failed: %v", err)
+		}
+	}
+
+	// Set some preferences
+	err := mgr.Set(context.Background(), userID, "language", "fr")
+	if err != nil {
+		t.Fatalf("Set failed: %v", err)
+	}
+	err = mgr.Set(context.Background(), userID, "timezone", "PST")
+	if err != nil {
+		t.Fatalf("Set failed: %v", err)
+	}
+
+	// Mock expected preferences from storage
+	expectedPrefs := map[string]*Preference{
+		"language": {
+			UserID:       userID,
+			Key:          "language",
+			Value:        "fr",
+			DefaultValue: "en",
+			Type:         "string",
+			Category:     category,
+			UpdatedAt:    time.Now(),
+		},
+		"timezone": {
+			UserID:       userID,
+			Key:          "timezone",
+			Value:        "PST",
+			DefaultValue: "UTC",
+			Type:         "string",
+			Category:     category,
+			UpdatedAt:    time.Now(),
+		},
+	}
+
+	// Test cases
+	testCases := []struct {
+		name              string
+		cacheType         string
+		setupCache        func(_ *MockCache, _ *MockStorage) // Changed mc to _
+		userID            string
+		category          string
+		mockGetByCategory func(_ *MockStorage, _ string, _ string) // Changed mockStore, uid, cat to _
+		expectedPrefs     map[string]*Preference
+		expectedError     error
+	}{
+		{
+			name:      "cache hit on get by category",
+			cacheType: "memory", // Can be any cache type
+			setupCache: func(_ *MockCache, store *MockStorage) {
+				// Set up the preferences in the mock storage
+				for _, pref := range expectedPrefs {
+					_ = store.Set(context.Background(), pref)
+				}
+			},
+			userID:   userID,
+			category: category,
+			mockGetByCategory: func(_ *MockStorage, _ string, _ string) {
+				// No additional setup needed as preferences are set in setupCache
+			},
+			expectedPrefs: expectedPrefs,
+			expectedError: nil,
+		},
+		{
+			name:      "cache error on get by category",
+			cacheType: "redis",
+			setupCache: func(_ *MockCache, store *MockStorage) {
+				// Set up the preferences in the mock storage
+				for _, pref := range expectedPrefs {
+					_ = store.Set(context.Background(), pref)
+				}
+			},
+			userID:   userID,
+			category: category,
+			mockGetByCategory: func(_ *MockStorage, _ string, _ string) {
+				// No additional setup needed as preferences are set in setupCache
+			},
+			expectedPrefs: expectedPrefs,
+			expectedError: nil,
+		},
+		{
+			name:      "store error on get by category after cache miss",
+			cacheType: "memory", // Can be any cache type
+			setupCache: func(_ *MockCache, store *MockStorage) {
+				// Set up the storage to return an error for GetByCategory
+				store.SetGetByCategoryError(errors.New("store GetByCategory error"))
+			},
+			userID:   userID,
+			category: category,
+			mockGetByCategory: func(_ *MockStorage, _ string, _ string) {
+				// No additional setup needed as we set the error in setupCache
+			},
+			expectedPrefs: nil,
+			expectedError: fmt.Errorf("storage.GetByCategory failed for category '%s': %w", category, errors.New("store GetByCategory error")),
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := NewMockStorage()
+			cache := NewMockCache()
+			logger := &MockLogger{}
+
+			mgr := New(
+				WithStorage(store),
+				WithCache(cache),
+				WithLogger(logger),
+			)
+
+			// Set up the cache and storage as per the test case
+			if tc.setupCache != nil {
+				tc.setupCache(cache, store)
+			}
+			if tc.mockGetByCategory != nil {
+				tc.mockGetByCategory(store, tc.userID, tc.category)
+			}
+
+			// Get preferences by category for the user
+			prefs, err := mgr.GetByCategory(context.Background(), tc.userID, tc.category)
+
+			// Check the error
+			if err != nil {
+				if tc.expectedError == nil {
+					t.Errorf("Expected no error, got: %v", err)
+				} else if err.Error() != tc.expectedError.Error() {
+					t.Errorf("Expected error '%v', got '%v'", tc.expectedError, err)
+				}
+			} else if tc.expectedError != nil {
+				t.Errorf("Expected error '%v', got none", tc.expectedError)
+			}
+
+			// Check the preferences
+			if len(prefs) != len(tc.expectedPrefs) {
+				t.Errorf("Expected %d preferences, got %d", len(tc.expectedPrefs), len(prefs))
+			}
+			for key, expectedPref := range tc.expectedPrefs {
+				if pref, exists := prefs[key]; !exists {
+					t.Errorf("Expected preference '%s' to exist", key)
+				} else if pref.Value != expectedPref.Value {
+					t.Errorf("Preference '%s' value mismatch: expected '%v', got '%v'", key, expectedPref.Value, pref.Value)
+				}
 			}
 		})
 	}

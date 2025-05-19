@@ -1,15 +1,18 @@
 package cache
 
 import (
+	"bytes"
 	"context"
 	"testing"
 	"time"
+
+	"github.com/CreativeUnicorns/userprefs"
 )
 
 // TestCacheInterface ensures that MemoryCache and RedisCache implement the Cache interface
 func TestCacheInterface(t *testing.T) {
 	t.Name()
-	var _ Cache = NewMemoryCache()
+	var _ userprefs.Cache = NewMemoryCache()
 
 	// Since RedisCache requires a running Redis instance, we'll skip testing it here.
 	// Implement mock Redis client and test RedisCache in a separate test file.
@@ -26,7 +29,7 @@ func TestCache_GetSetDelete_Close(t *testing.T) {
 	}()
 
 	// Test Set
-	err := cache.Set(ctx, "key1", "value1", time.Minute)
+	err := cache.Set(ctx, "key1", []byte("value1"), time.Minute)
 	if err != nil {
 		t.Fatalf("Set failed: %v", err)
 	}
@@ -36,7 +39,7 @@ func TestCache_GetSetDelete_Close(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get failed: %v", err)
 	}
-	if val != "value1" {
+	if !bytes.Equal(val, []byte("value1")) {
 		t.Errorf("Expected 'value1', got '%v'", val)
 	}
 
@@ -64,7 +67,7 @@ func TestMemoryCache_Expiration(t *testing.T) {
 	}()
 
 	// Set key with short TTL
-	err := cache.Set(ctx, "tempKey", "tempValue", time.Millisecond*100)
+	err := cache.Set(ctx, "tempKey", []byte("tempValue"), time.Millisecond*100)
 	if err != nil {
 		t.Fatalf("Set failed: %v", err)
 	}
@@ -74,7 +77,7 @@ func TestMemoryCache_Expiration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get failed: %v", err)
 	}
-	if val != "tempValue" {
+	if !bytes.Equal(val, []byte("tempValue")) {
 		t.Errorf("Expected 'tempValue', got '%v'", val)
 	}
 
@@ -99,7 +102,7 @@ func TestMemoryCache_NoExpiration(t *testing.T) {
 	}()
 
 	// Set key with no expiration
-	err := cache.Set(ctx, "permanentKey", "permanentValue", 0)
+	err := cache.Set(ctx, "permanentKey", []byte("permanentValue"), 0)
 	if err != nil {
 		t.Fatalf("Set failed: %v", err)
 	}
@@ -112,7 +115,7 @@ func TestMemoryCache_NoExpiration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get failed: %v", err)
 	}
-	if val != "permanentValue" {
+	if !bytes.Equal(val, []byte("permanentValue")) {
 		t.Errorf("Expected 'permanentValue', got '%v'", val)
 	}
 }

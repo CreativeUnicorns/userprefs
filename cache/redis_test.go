@@ -3,7 +3,6 @@ package cache
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -14,7 +13,9 @@ import (
 
 // MockRedisClient is a mock implementation of redis.Client
 type MockRedisClient struct {
-	data map[string]string
+	data        map[string]string
+	PingErr     error // Error to return on Ping
+	CloseCalled bool  // True if Close was called
 }
 
 func NewMockRedisClient() *MockRedisClient {
@@ -32,14 +33,10 @@ func (m *MockRedisClient) Get(ctx context.Context, key string) *redis.StringCmd 
 	return redis.NewStringResult(val, nil)
 }
 
-func (m *MockRedisClient) Set(ctx context.Context, key string, value interface{}, expiration time.Duration) *redis.StatusCmd {
+func (m *MockRedisClient) Set(ctx context.Context, key string, value []byte, expiration time.Duration) *redis.StatusCmd {
 	_, _ = ctx.Deadline()
 	_ = expiration.Abs().Milliseconds()
-	if jsonVal, ok := value.([]byte); ok {
-		m.data[key] = string(jsonVal)
-	} else {
-		m.data[key] = value.(string)
-	}
+	m.data[key] = string(value) // value is already []byte, store as string in mock
 	return redis.NewStatusResult("OK", nil)
 }
 
@@ -55,14 +52,37 @@ func (m *MockRedisClient) Del(ctx context.Context, keys ...string) *redis.IntCmd
 	return redis.NewIntResult(int64(count), nil)
 }
 
+func (m *MockRedisClient) Ping(ctx context.Context) *redis.StatusCmd {
+	_, _ = ctx.Deadline()
+	if m.PingErr != nil {
+		return redis.NewStatusResult("", m.PingErr)
+	}
+	return redis.NewStatusResult("PONG", nil)
+}
+
 func (m *MockRedisClient) Close() error {
+	m.CloseCalled = true
 	return nil
 }
 
 func TestRedisCache_GetSetDelete(t *testing.T) {
 	ctx := context.Background()
 	mockClient := NewMockRedisClient()
-	redisCache := &RedisCache{client: mockClient}
+
+	// Mock redisNewClientFunc to return our mock client
+	originalNewClientFunc := redisNewClientFunc
+	redisNewClientFunc = func(_ *redis.Options) RedisClient {
+		return mockClient
+	}
+	defer func() { redisNewClientFunc = originalNewClientFunc }() // Restore original
+
+	redisCache, err := NewRedisCache() // Use default options, client is mocked
+	if err != nil {
+		t.Fatalf("NewRedisCache failed: %v", err)
+	}
+	if redisCache == nil {
+		t.Fatal("NewRedisCache returned nil cache")
+	}
 
 	key := "redisKey"
 	value := []byte("test_value")
@@ -78,22 +98,12 @@ func TestRedisCache_GetSetDelete(t *testing.T) {
 		t.Fatalf("Get failed: %v", err)
 	}
 
-	retrievedBytes, ok := val.([]byte)
-	if !ok {
-		t.Fatalf("Expected Get to return []byte, got %T", val)
-	}
+	retrievedBytes := val // val is already []byte from redisCache.Get
 
-	// When value (which is []byte("test_value")) is set via RedisCache.Set,
-	// it's first JSON marshalled. json.Marshal([]byte("test_value")) results in
-	// the JSON string literal "dGVzdF92YWx1ZQ==" (base64 encoded content, quoted).
-	// So, we expect retrievedBytes to be this JSON string literal.
-	expectedMarshalledBytes, err := json.Marshal(value)
-	if err != nil {
-		t.Fatalf("Failed to marshal expected value for comparison: %v", err)
-	}
-
-	if !bytes.Equal(retrievedBytes, expectedMarshalledBytes) {
-		t.Errorf("Retrieved value mismatch: got %s, want %s", string(retrievedBytes), string(expectedMarshalledBytes))
+	// The retrievedBytes should be identical to the original 'value' []byte passed to Set,
+	// as RedisCache now directly stores/retrieves the []byte without further marshalling.
+	if !bytes.Equal(retrievedBytes, value) {
+		t.Errorf("Retrieved value mismatch: got %s, want %s", string(retrievedBytes), string(value))
 	}
 
 	// Delete value
@@ -110,7 +120,20 @@ func TestRedisCache_GetSetDelete(t *testing.T) {
 
 func TestRedisCache_Close(t *testing.T) {
 	mockClient := NewMockRedisClient()
-	redisCache := &RedisCache{client: mockClient}
+
+	originalNewClientFunc := redisNewClientFunc
+	redisNewClientFunc = func(_ *redis.Options) RedisClient {
+		return mockClient
+	}
+	defer func() { redisNewClientFunc = originalNewClientFunc }()
+
+	redisCache, err := NewRedisCache() // Use default options, client is mocked
+	if err != nil {
+		t.Fatalf("NewRedisCache failed: %v", err)
+	}
+	if redisCache == nil {
+		t.Fatal("NewRedisCache returned nil cache")
+	}
 
 	// Close cache
 	if err := redisCache.Close(); err != nil {
@@ -118,8 +141,36 @@ func TestRedisCache_Close(t *testing.T) {
 	}
 
 	// Attempt to set after closing (should not fail in mock)
-	err := redisCache.Set(context.Background(), "key", "value", time.Minute)
+	err = redisCache.Set(context.Background(), "key", []byte("value"), time.Minute)
 	if err != nil {
 		t.Errorf("Set after close failed: %v", err)
+	}
+
+	if !mockClient.CloseCalled {
+		t.Error("Expected client.Close to be called, but it wasn't")
+	}
+}
+
+func TestNewRedisCache_PingFailure(t *testing.T) {
+	mockClient := NewMockRedisClient()
+	expectedPingErr := errors.New("simulated ping failure")
+	mockClient.PingErr = expectedPingErr
+
+	originalNewClientFunc := redisNewClientFunc
+	redisNewClientFunc = func(_ *redis.Options) RedisClient {
+		return mockClient
+	}
+	defer func() { redisNewClientFunc = originalNewClientFunc }()
+
+	_, err := NewRedisCache(WithRedisAddress("localhost:1234")) // Address is just for error msg context
+	if err == nil {
+		t.Fatal("NewRedisCache did not return error on ping failure")
+	}
+
+	if !errors.Is(err, expectedPingErr) {
+		t.Errorf("Expected error to wrap '%v', got '%v'", expectedPingErr, err)
+	}
+	if !mockClient.CloseCalled {
+		t.Error("Expected client.Close to be called on ping failure, but it wasn't")
 	}
 }
