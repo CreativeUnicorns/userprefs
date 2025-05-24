@@ -1,0 +1,4 @@
+cli.env
+/test_builds/**
+main
+supabase-example
