@@ -22,9 +22,9 @@ func TestManager_DefinePreference(t *testing.T) {
 
 	def := PreferenceDefinition{
 		Key:          "theme",
-		Type:         "enum",
+		Type:         StringType,
 		Category:     "appearance",
-		DefaultValue: "dark",
+		DefaultValue: "light",
 		AllowedValues: []interface{}{
 			"light",
 			"dark",
@@ -66,7 +66,7 @@ func TestManager_GetSet(t *testing.T) {
 
 	def := PreferenceDefinition{
 		Key:          "notifications",
-		Type:         "boolean",
+		Type:         BoolType,
 		Category:     "settings",
 		DefaultValue: false,
 	}
@@ -129,7 +129,7 @@ func TestManager_Delete(t *testing.T) {
 
 	def := PreferenceDefinition{
 		Key:          "volume",
-		Type:         "number",
+		Type:         FloatType,
 		Category:     "audio",
 		DefaultValue: 50.0, // Default as float64
 	}
@@ -191,7 +191,7 @@ func TestManager_GetByCategory(t *testing.T) {
 	prefs := []PreferenceDefinition{
 		{
 			Key:          "theme",
-			Type:         "enum",
+			Type:         StringType,
 			Category:     "appearance",
 			DefaultValue: "light",
 			AllowedValues: []interface{}{
@@ -201,13 +201,13 @@ func TestManager_GetByCategory(t *testing.T) {
 		},
 		{
 			Key:          "font_size",
-			Type:         "number",
+			Type:         FloatType,
 			Category:     "appearance",
 			DefaultValue: 12.0, // Default as float64
 		},
 		{
 			Key:          "notifications",
-			Type:         "boolean",
+			Type:         BoolType,
 			Category:     "settings",
 			DefaultValue: true,
 		},
@@ -272,13 +272,13 @@ func TestManager_GetAll(t *testing.T) {
 	prefsToDefine := []PreferenceDefinition{
 		{
 			Key:          "language",
-			Type:         "string",
+			Type:         StringType,
 			Category:     "general",
 			DefaultValue: "en",
 		},
 		{
 			Key:          "timezone",
-			Type:         "string",
+			Type:         StringType,
 			Category:     "general",
 			DefaultValue: "UTC",
 		},
@@ -334,10 +334,10 @@ func TestManager_Concurrency(t *testing.T) {
 	)
 
 	def := PreferenceDefinition{
-		Key:          "volume",
-		Type:         "number",
-		Category:     "audio",
-		DefaultValue: 50.0, // Default as float64
+		Key:          "counter",
+		Type:         IntType,
+		Category:     "test",
+		DefaultValue: 0,
 	}
 
 	err := mgr.DefinePreference(def)
@@ -351,16 +351,16 @@ func TestManager_Concurrency(t *testing.T) {
 
 	// Concurrently set preferences
 	for i := 0; i < numGoroutines; i++ {
-		go func(val float64) {
+		go func(val int) {
 			// In a real scenario with high contention, Set might return an error from storage/cache.
 			// MockStorage/MockCache are synchronous, so less likely to show race-related errors here unless Manager itself has issues.
-			if err := mgr.Set(context.Background(), userID, "volume", val); err != nil {
+			if err := mgr.Set(context.Background(), userID, "counter", val); err != nil {
 				// t.Errorf is not goroutine-safe. Collect errors or use t.Logf then Fail.
 				// For simplicity in this mock test, we'll assume Set doesn't error out often under mock conditions.
 				logger.Error("error in Set (concurrent)", "err", err) // Using mock logger
 			}
 			done <- true
-		}(float64(i)) // Set as float64
+		}(i) // Set as int
 	}
 
 	// Wait for all goroutines to finish
@@ -369,21 +369,25 @@ func TestManager_Concurrency(t *testing.T) {
 	}
 
 	// Get the final value
-	pref, err := mgr.Get(context.Background(), userID, "volume")
+	pref, err := mgr.Get(context.Background(), userID, "counter")
 	if err != nil {
 		t.Fatalf("Get failed: %v", err)
 	}
 
-	// The final value should be one of the values set (0.0 to 99.0)
+	// The final value should be one of the values set (0 to 99)
 	// Due to mock cache/storage behavior (last write wins), it's hard to predict the exact final value without more sophisticated mocks.
-	// We'll check if it's a float64 and within the possible range.
+	// We'll check if it's a float64 and within the possible range (JSON marshal/unmarshal converts int to float64).
 	switch v := pref.Value.(type) {
 	case float64:
 		if v < 0.0 || v > float64(numGoroutines-1) {
-			t.Errorf("Final volume out of expected range [0.0, %.1f]: %v", float64(numGoroutines-1), v)
+			t.Errorf("Final counter out of expected range [0.0, %.1f]: %v", float64(numGoroutines-1), v)
+		}
+	case int:
+		if v < 0 || v > numGoroutines-1 {
+			t.Errorf("Final counter out of expected range [0, %d]: %v", numGoroutines-1, v)
 		}
 	default:
-		t.Errorf("Unexpected type for volume: %T, value: %v", pref.Value, pref.Value)
+		t.Errorf("Unexpected type for counter: %T, value: %v", pref.Value, pref.Value)
 	}
 }
 
@@ -391,7 +395,7 @@ func TestManager_Get_CacheInteraction(t *testing.T) {
 	// Define a common preference definition for these tests
 	def := PreferenceDefinition{
 		Key:          "test_cache_pref",
-		Type:         "string",
+		Type:         StringType,
 		Category:     "cache_tests",
 		DefaultValue: "default_cache_value",
 	}
@@ -609,7 +613,7 @@ func TestManager_Set_ValidationAndTypeChecking(t *testing.T) {
 	// 1. Test Type Mismatch
 	defTypeMismatch := PreferenceDefinition{
 		Key:          "typeMismatchPref",
-		Type:         "string",
+		Type:         StringType,
 		Category:     "test",
 		DefaultValue: "default",
 	}
@@ -626,7 +630,7 @@ func TestManager_Set_ValidationAndTypeChecking(t *testing.T) {
 	// 2. Test Validation Function Failure
 	defValidationFail := PreferenceDefinition{
 		Key:          "validationFailPref",
-		Type:         "string",
+		Type:         StringType,
 		Category:     "test",
 		DefaultValue: "default",
 		ValidateFunc: func(value interface{}) error {
@@ -661,7 +665,7 @@ func TestManager_Set_ValidationAndTypeChecking(t *testing.T) {
 	// 3. Test Validation Function Success
 	defValidationSuccess := PreferenceDefinition{
 		Key:          "validationSuccessPref",
-		Type:         "string",
+		Type:         StringType,
 		Category:     "test",
 		DefaultValue: "default",
 		ValidateFunc: func(value interface{}) error {
@@ -725,19 +729,19 @@ func TestManager_GetAllPreferences(t *testing.T) {
 	prefsToDefine := []PreferenceDefinition{
 		{
 			Key:          "language",
-			Type:         "string",
+			Type:         StringType,
 			Category:     "general",
 			DefaultValue: "en",
 		},
 		{
 			Key:          "timezone",
-			Type:         "string",
+			Type:         StringType,
 			Category:     "general",
 			DefaultValue: "UTC",
 		},
 		{
 			Key:          "notifications",
-			Type:         "boolean",
+			Type:         BoolType,
 			Category:     "settings",
 			DefaultValue: true,
 		},
@@ -766,7 +770,7 @@ func TestManager_GetAllPreferences(t *testing.T) {
 			Key:          "language",
 			Value:        "fr",
 			DefaultValue: "en",
-			Type:         "string",
+			Type:         StringType,
 			Category:     "general",
 			UpdatedAt:    time.Now(),
 		},
@@ -775,7 +779,7 @@ func TestManager_GetAllPreferences(t *testing.T) {
 			Key:          "timezone",
 			Value:        "PST",
 			DefaultValue: "UTC",
-			Type:         "string",
+			Type:         StringType,
 			Category:     "general",
 			UpdatedAt:    time.Now(),
 		},
@@ -784,7 +788,7 @@ func TestManager_GetAllPreferences(t *testing.T) {
 			Key:          "notifications",
 			Value:        true,
 			DefaultValue: false,
-			Type:         "boolean",
+			Type:         BoolType,
 			Category:     "settings",
 			UpdatedAt:    time.Now(),
 		},
@@ -868,19 +872,19 @@ func TestManager_GetAllPreferences(t *testing.T) {
 			prefsToDefine := []PreferenceDefinition{
 				{
 					Key:          "language",
-					Type:         "string",
+					Type:         StringType,
 					Category:     "general",
 					DefaultValue: "en",
 				},
 				{
 					Key:          "timezone",
-					Type:         "string",
+					Type:         StringType,
 					Category:     "general",
 					DefaultValue: "UTC",
 				},
 				{
 					Key:          "notifications",
-					Type:         "boolean",
+					Type:         BoolType,
 					Category:     "settings",
 					DefaultValue: false, // Note: this matches the expectedPrefs definition
 				},
@@ -946,19 +950,19 @@ func TestManager_GetPreferencesByCategory(t *testing.T) {
 	prefsToDefine := []PreferenceDefinition{
 		{
 			Key:          "language",
-			Type:         "string",
+			Type:         StringType,
 			Category:     category,
 			DefaultValue: "en",
 		},
 		{
 			Key:          "timezone",
-			Type:         "string",
+			Type:         StringType,
 			Category:     category,
 			DefaultValue: "UTC",
 		},
 		{
 			Key:          "notifications",
-			Type:         "boolean",
+			Type:         BoolType,
 			Category:     "settings",
 			DefaultValue: true,
 		},
@@ -987,7 +991,7 @@ func TestManager_GetPreferencesByCategory(t *testing.T) {
 			Key:          "language",
 			Value:        "fr",
 			DefaultValue: "en",
-			Type:         "string",
+			Type:         StringType,
 			Category:     category,
 			UpdatedAt:    time.Now(),
 		},
@@ -996,7 +1000,7 @@ func TestManager_GetPreferencesByCategory(t *testing.T) {
 			Key:          "timezone",
 			Value:        "PST",
 			DefaultValue: "UTC",
-			Type:         "string",
+			Type:         StringType,
 			Category:     category,
 			UpdatedAt:    time.Now(),
 		},

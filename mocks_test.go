@@ -33,7 +33,12 @@ func (m *MockStorage) Get(ctx context.Context, userID, key string) (*Preference,
 
 	if userPrefs, exists := m.data[userID]; exists {
 		if pref, exists := userPrefs[key]; exists {
-			return pref, nil
+			// Return a deep copy to prevent modifications from affecting stored data
+			copiedPref, err := deepCopyPreference(pref)
+			if err != nil {
+				return nil, fmt.Errorf("mockstorage: error deep copying preference %s for user %s: %w", key, userID, err)
+			}
+			return copiedPref, nil
 		}
 	}
 	return nil, ErrNotFound

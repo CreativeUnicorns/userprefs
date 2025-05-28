@@ -41,3 +41,9 @@ var ErrSerialization = errors.New("data serialization error")
 
 // ErrInternal indicates an unexpected internal server error.
 var ErrInternal = errors.New("internal server error")
+
+// ErrEncryptionRequired indicates that an encryption manager is required but not configured.
+var ErrEncryptionRequired = errors.New("encryption manager required for encrypted preferences")
+
+// ErrEncryptionFailed indicates that an encryption or decryption operation failed.
+var ErrEncryptionFailed = errors.New("encryption operation failed")

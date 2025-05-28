@@ -65,11 +65,13 @@ func New(opts ...Option) *Manager {
 //   - Type: The expected data type (e.g., String, Bool, Int, Float, JSON).
 //   - DefaultValue: The value to use if the user hasn't set this preference.
 //   - Category: An optional string for grouping preferences.
+//   - Encrypted: Whether the preference value should be encrypted at rest.
 //   - ValidateFunc: An optional function for custom value validation during Set operations.
 //
 // Returns:
 //   - ErrInvalidKey: if def.Key is empty.
 //   - ErrInvalidType: if def.Type is not a supported PreferenceType (see IsValidType).
+//   - ErrEncryptionRequired: if def.Encrypted is true but no encryption manager is configured.
 //   - nil: on successful registration of the preference definition.
 //
 // This method is thread-safe.
@@ -85,6 +87,11 @@ func (m *Manager) DefinePreference(def PreferenceDefinition) error {
 		return ErrInvalidType
 	}
 
+	// Validate encryption requirements
+	if def.Encrypted && m.config.encryptionManager == nil {
+		return fmt.Errorf("%w: preference '%s' is marked as encrypted but no encryption manager is configured", ErrEncryptionRequired, def.Key)
+	}
+
 	m.config.definitions[def.Key] = def
 	return nil
 }
@@ -98,15 +105,15 @@ func (m *Manager) DefinePreference(def PreferenceDefinition) error {
 //  2. Definition Check: Verifies that the preference key has been defined. If not, returns ErrPreferenceNotDefined.
 //  3. Cache Lookup (if cache is configured):
 //     a. Attempts to retrieve the preference from the cache.
-//     b. On cache hit (no error), the cached preference is returned.
+//     b. On cache hit (no error), the cached preference is returned after decryption if needed.
 //     c. On cache error (excluding specific 'not found' errors, if distinguishable by the cache implementation):
 //     Logs the error. Returns a Preference populated with the *defined default value* and the original cache error.
 //     This allows the application to continue with a default during transient cache issues.
 //     d. On cache miss (or 'not found' error), proceeds to storage lookup.
 //  4. Storage Lookup (if no cache, or cache miss):
 //     a. Fetches the preference from the storage backend.
-//     b. If found in storage: The retrieved preference is returned. If a cache is configured,
-//     the preference is asynchronously stored in the cache for future requests.
+//     b. If found in storage: The retrieved preference value is decrypted if needed and returned.
+//     If a cache is configured, the preference is asynchronously stored in the cache for future requests.
 //     c. If storage returns ErrNotFound: A Preference struct populated with the *defined default value*
 //     is returned with a nil error (indicating successful application of default).
 //     d. If storage returns any other error: That error is wrapped and returned.
@@ -115,6 +122,7 @@ func (m *Manager) DefinePreference(def PreferenceDefinition) error {
 //   - (*Preference, nil): On successful retrieval (from cache or storage) or when a defined default value is applied.
 //   - (nil, ErrInvalidInput): If userID or key is empty.
 //   - (nil, ErrPreferenceNotDefined): If the preference key has not been defined.
+//   - (nil, ErrEncryptionFailed): If decryption is required but fails.
 //   - (*Preference with default, wrapped cache error): If cache fails and a default is applied.
 //   - (nil, wrapped storage error): If storage fails and a default cannot be applied or is not applicable.
 //
@@ -132,6 +140,7 @@ func (m *Manager) Get(ctx context.Context, userID, key string) (*Preference, err
 	if m.config.cache != nil {
 		prefFromCache, cacheErr := m.getFromCache(ctx, userID, key)
 		if cacheErr == nil { // Cache hit, no error
+			// Cached values are already decrypted for performance, so return directly
 			m.config.logger.Debug("Cache hit", "userID", userID, "key", key)
 			return prefFromCache, nil
 		}
@@ -178,6 +187,14 @@ func (m *Manager) Get(ctx context.Context, userID, key string) (*Preference, err
 		return nil, fmt.Errorf("storage.Get failed for key '%s': %w", key, err)
 	}
 
+	// Decrypt value if needed
+	decryptedValue, err := m.decryptValue(pref.Value, def)
+	if err != nil {
+		m.config.logger.Error("Failed to decrypt stored value", "userID", userID, "key", key, "error", err)
+		return nil, err
+	}
+	pref.Value = decryptedValue
+
 	if m.config.cache != nil {
 		m.setToCache(ctx, pref)
 	}
@@ -195,9 +212,10 @@ func (m *Manager) Get(ctx context.Context, userID, key string) (*Preference, err
 //     Returns ErrInvalidValue if type mismatch (e.g., providing a string for an Int preference).
 //  4. Custom Validation: If `ValidateFunc` is set in PreferenceDefinition, it's called. Returns ErrInvalidValue
 //     if this custom validation fails.
-//  5. Storage Operation: Saves the preference (UserID, Key, Value, Type, Category, DefaultValue from definition,
+//  5. Encryption: If the preference is marked as encrypted, the value is encrypted before storage.
+//  6. Storage Operation: Saves the preference (UserID, Key, Value, Type, Category, DefaultValue from definition,
 //     and current UpdatedAt) to the storage backend.
-//  6. Cache Invalidation (if cache is configured): Deletes the corresponding entry from the cache
+//  7. Cache Invalidation (if cache is configured): Deletes the corresponding entry from the cache
 //     to maintain consistency. Subsequent Get calls will fetch from storage and repopulate cache.
 //
 // Returns:
@@ -205,6 +223,7 @@ func (m *Manager) Get(ctx context.Context, userID, key string) (*Preference, err
 //   - ErrInvalidInput: If userID or key is empty.
 //   - ErrPreferenceNotDefined: If the preference key has not been defined.
 //   - ErrInvalidValue: If the provided value fails type validation or custom validation.
+//   - ErrEncryptionFailed: If encryption is required but fails.
 //   - A wrapped storage error: If the storage operation fails.
 //
 // This method is thread-safe.
@@ -230,11 +249,17 @@ func (m *Manager) Set(ctx context.Context, userID, key string, value interface{}
 		}
 	}
 
+	// Encrypt value if required
+	storageValue, err := m.encryptValue(value, def)
+	if err != nil {
+		return err
+	}
+
 	pref := &Preference{
 		UserID:       userID,
 		Key:          key,
-		Value:        value,
-		DefaultValue: def.DefaultValue, // Added this line
+		Value:        storageValue, // Store the encrypted value
+		DefaultValue: def.DefaultValue,
 		Type:         def.Type,
 		Category:     def.Category,
 		UpdatedAt:    time.Now(),
@@ -246,16 +271,22 @@ func (m *Manager) Set(ctx context.Context, userID, key string, value interface{}
 	}
 
 	if m.config.cache != nil {
-		m.setToCache(ctx, pref)
+		// Cache the preference with the original (decrypted) value for better performance
+		cachedPref := &Preference{
+			UserID:       userID,
+			Key:          key,
+			Value:        value, // Store the original unencrypted value in cache
+			DefaultValue: def.DefaultValue,
+			Type:         def.Type,
+			Category:     def.Category,
+			UpdatedAt:    pref.UpdatedAt,
+		}
+		m.setToCache(ctx, cachedPref)
 	}
 
 	return nil
 }
 
-// GetByCategory retrieves all preferences for a given userID that belong to the specified category.
-// This method currently fetches directly from the storage backend and does not utilize the cache.
-// For each preference found in storage under the category, it checks if a corresponding
-// PreferenceDefinition exists. If not, a warning is logged, and the preference is skipped.
 // GetByCategory retrieves all preferences for a given userID that belong to the specified category.
 // The provided context.Context can be used for cancellation or timeouts, propagated to storage.
 //
@@ -264,12 +295,13 @@ func (m *Manager) Set(ctx context.Context, userID, key string, value interface{}
 //   - Fetches preferences directly from the storage backend. This method *does not* currently
 //     utilize or interact with the cache.
 //   - For each preference retrieved from storage, it ensures the DefaultValue from its
-//     definition is populated in the returned Preference struct if the stored DefaultValue is nil.
+//     definition is populated in the returned Preference struct and decrypts values if needed.
 //
 // Returns:
 //   - (map[string]*Preference, nil): A map of preference keys to Preference structs on success.
 //     The map will be empty if no preferences match the category or if the user has no preferences.
 //   - (nil, ErrInvalidInput): If userID is empty.
+//   - (nil, ErrEncryptionFailed): If decryption is required but fails.
 //   - (nil, wrapped storage error): If the storage operation fails.
 //
 // This method is thread-safe.
@@ -283,6 +315,29 @@ func (m *Manager) GetByCategory(ctx context.Context, userID, category string) (m
 		m.config.logger.Error("Storage GetByCategory failed", "userID", userID, "category", category, "error", err)
 		return nil, fmt.Errorf("storage.GetByCategory failed for category '%s': %w", category, err)
 	}
+
+	// Decrypt values for preferences that are marked as encrypted
+	for key, pref := range prefs {
+		def, exists := m.GetDefinition(key)
+		if !exists {
+			m.config.logger.Warn("Found preference without definition", "userID", userID, "key", key)
+			continue
+		}
+
+		// Decrypt value if needed
+		decryptedValue, err := m.decryptValue(pref.Value, def)
+		if err != nil {
+			m.config.logger.Error("Failed to decrypt preference value", "userID", userID, "key", key, "error", err)
+			return nil, err
+		}
+		pref.Value = decryptedValue
+
+		// Ensure definition data is reflected
+		pref.DefaultValue = def.DefaultValue
+		pref.Type = def.Type
+		pref.Category = def.Category
+	}
+
 	return prefs, nil
 }
 
@@ -296,6 +351,7 @@ func (m *Manager) GetByCategory(ctx context.Context, userID, category string) (m
 //  4. For each defined preference:
 //     a. If a corresponding preference is found in the storage results, that preference is used.
 //     Its DefaultValue, Type, and Category are updated from the definition to ensure consistency.
+//     The value is decrypted if the preference is marked as encrypted.
 //     b. If not found in storage, a new Preference struct is created using the DefaultValue from its definition.
 //     The Value field is set to this DefaultValue.
 //     c. The processed preference is added to the result map.
@@ -305,6 +361,7 @@ func (m *Manager) GetByCategory(ctx context.Context, userID, category string) (m
 //   - (map[string]*Preference, nil): A map of preference keys to Preference structs on success.
 //     The map will be empty if the user has no (defined) preferences or if no preferences are defined.
 //   - (nil, ErrInvalidInput): If userID is empty.
+//   - (nil, ErrEncryptionFailed): If decryption is required but fails.
 //   - (nil, wrapped storage error): If the storage.GetAll operation fails.
 //
 // This method is thread-safe.
@@ -350,7 +407,15 @@ func (m *Manager) GetAll(ctx context.Context, userID string) (map[string]*Prefer
 			finalPref.DefaultValue = def.DefaultValue
 			finalPref.Type = def.Type
 			finalPref.Category = def.Category
-			// UserID and Key should match, Value and UpdatedAt come from storage.
+
+			// Decrypt value if needed
+			decryptedValue, err := m.decryptValue(finalPref.Value, def)
+			if err != nil {
+				m.config.logger.Error("Failed to decrypt preference value in GetAll", "userID", userID, "key", key, "error", err)
+				return nil, err
+			}
+			finalPref.Value = decryptedValue
+			// UserID and Key should match, UpdatedAt comes from storage.
 		} else {
 			// Not found in storage, use default from definition
 			finalPref = &Preference{
@@ -504,5 +569,94 @@ func (m *Manager) deleteFromCache(ctx context.Context, userID, key string) {
 	if err := m.config.cache.Delete(ctx, cacheKey); err != nil {
 		// Similarly, don't spam logs for misses if cache.Delete returns a specific 'not found' error.
 		m.config.logger.Warn("Failed to delete preference from cache", "cacheKey", cacheKey, "error", err)
+	}
+}
+
+// encryptValue encrypts a preference value if encryption is required.
+// It converts the value to a string representation before encryption.
+func (m *Manager) encryptValue(value interface{}, def PreferenceDefinition) (interface{}, error) {
+	if !def.Encrypted || m.config.encryptionManager == nil {
+		return value, nil
+	}
+
+	// Convert value to string for encryption
+	var plaintext string
+	switch v := value.(type) {
+	case string:
+		plaintext = v
+	case nil:
+		return nil, nil
+	default:
+		// For non-string types, marshal to JSON
+		jsonBytes, err := json.Marshal(v)
+		if err != nil {
+			return nil, fmt.Errorf("%w: failed to marshal value for encryption: %v", ErrEncryptionFailed, err)
+		}
+		plaintext = string(jsonBytes)
+	}
+
+	encrypted, err := m.config.encryptionManager.Encrypt(plaintext)
+	if err != nil {
+		return nil, fmt.Errorf("%w: encryption failed for key '%s': %v", ErrEncryptionFailed, def.Key, err)
+	}
+
+	return encrypted, nil
+}
+
+// decryptValue decrypts a preference value if it was encrypted.
+// It converts the decrypted string back to the appropriate type.
+func (m *Manager) decryptValue(encryptedValue interface{}, def PreferenceDefinition) (interface{}, error) {
+	if !def.Encrypted || m.config.encryptionManager == nil {
+		return encryptedValue, nil
+	}
+
+	if encryptedValue == nil {
+		return nil, nil
+	}
+
+	encryptedStr, ok := encryptedValue.(string)
+	if !ok {
+		// If it's not a string, it might be an unencrypted value from old data
+		// Return as-is and log a warning
+		m.config.logger.Warn("Expected encrypted string but got different type", "key", def.Key, "type", fmt.Sprintf("%T", encryptedValue))
+		return encryptedValue, nil
+	}
+
+	plaintext, err := m.config.encryptionManager.Decrypt(encryptedStr)
+	if err != nil {
+		return nil, fmt.Errorf("%w: decryption failed for key '%s': %v", ErrEncryptionFailed, def.Key, err)
+	}
+
+	// Convert back to original type
+	switch def.Type {
+	case StringType:
+		return plaintext, nil
+	case BoolType:
+		var result bool
+		if err := json.Unmarshal([]byte(plaintext), &result); err != nil {
+			return nil, fmt.Errorf("%w: failed to unmarshal decrypted bool: %v", ErrEncryptionFailed, err)
+		}
+		return result, nil
+	case IntType:
+		var result int
+		if err := json.Unmarshal([]byte(plaintext), &result); err != nil {
+			return nil, fmt.Errorf("%w: failed to unmarshal decrypted int: %v", ErrEncryptionFailed, err)
+		}
+		return result, nil
+	case FloatType:
+		var result float64
+		if err := json.Unmarshal([]byte(plaintext), &result); err != nil {
+			return nil, fmt.Errorf("%w: failed to unmarshal decrypted float: %v", ErrEncryptionFailed, err)
+		}
+		return result, nil
+	case JSONType:
+		var result interface{}
+		if err := json.Unmarshal([]byte(plaintext), &result); err != nil {
+			return nil, fmt.Errorf("%w: failed to unmarshal decrypted JSON: %v", ErrEncryptionFailed, err)
+		}
+		return result, nil
+	default:
+		// Unknown type, return as string
+		return plaintext, nil
 	}
 }

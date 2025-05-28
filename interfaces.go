@@ -84,3 +84,19 @@ type Cache interface {
 	// Implementations should ensure this method is safe to call multiple times.
 	Close() error
 }
+
+// EncryptionManager defines the contract for encrypting and decrypting preference values.
+// It provides AES-256 encryption capabilities for sensitive user preferences marked as encrypted.
+// Implementations must be thread-safe for concurrent access from multiple goroutines.
+type EncryptionManager interface {
+	// Encrypt encrypts plaintext and returns the encrypted value as a string.
+	// The implementation should use secure encryption (AES-256-GCM) and handle
+	// base64 encoding of the result for storage compatibility.
+	// Returns an error if encryption fails.
+	Encrypt(plaintext string) (string, error)
+
+	// Decrypt decrypts an encrypted value and returns the original plaintext.
+	// The encrypted value is expected to be in the format produced by Encrypt.
+	// Returns an error if decryption fails or the encrypted value is invalid.
+	Decrypt(encrypted string) (string, error)
+}
