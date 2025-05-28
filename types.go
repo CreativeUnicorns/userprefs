@@ -49,6 +49,10 @@ type PreferenceDefinition struct {
 	// The Manager checks against these values during Set operations if Type validation passes.
 	// The types of elements in AllowedValues must match the specified Type.
 	AllowedValues []interface{} `json:"allowed_values,omitempty"`
+	// Encrypted indicates whether this preference's value should be encrypted at rest.
+	// When true, the Manager will encrypt the value before storing it and decrypt it when retrieving.
+	// Defaults to false. Requires USERPREFS_ENCRYPTION_KEY environment variable to be set.
+	Encrypted bool `json:"encrypted,omitempty"`
 	// ValidateFunc is an optional custom function that can be provided to perform complex validation
 	// on a preference's value when it is being set. It is called after basic type checking and
 	// AllowedValues checks (if any). The function receives the value to be validated and should
@@ -70,6 +74,8 @@ type Config struct {
 	logger Logger
 	// definitions stores all registered PreferenceDefinition instances, keyed by their PreferenceDefinition.Key.
 	definitions map[string]PreferenceDefinition
+	// encryptionManager is the optional encryption implementation for encrypting preference values.
+	encryptionManager EncryptionManager
 }
 
 // Option defines the signature for a functional option that configures a Manager instance.
@@ -104,5 +110,15 @@ func WithCache(cache Cache) Option {
 func WithLogger(l Logger) Option {
 	return func(c *Config) {
 		c.logger = l
+	}
+}
+
+// WithEncryption is a functional option that sets the encryption implementation for the Manager.
+// If an EncryptionManager is provided, the Manager will use it to encrypt and decrypt
+// preference values marked as encrypted in their PreferenceDefinition.
+// This option is optional but required if any preferences are marked as encrypted.
+func WithEncryption(em EncryptionManager) Option {
+	return func(c *Config) {
+		c.encryptionManager = em
 	}
 }

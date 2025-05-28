@@ -6,8 +6,8 @@ import (
 )
 
 func TestIsValidType(t *testing.T) {
-	validTypesList := []string{"string", "boolean", "number", "json", "enum"}
-	invalidTypesList := []string{"invalid", "list", "", "integer"}
+	validTypesList := []string{StringType, BoolType, IntType, FloatType, JSONType}
+	invalidTypesList := []string{"invalid", "list", "", "integer", "boolean", "number", "enum"}
 
 	for _, tt := range validTypesList {
 		if !isValidType(tt) {
@@ -25,7 +25,7 @@ func TestIsValidType(t *testing.T) {
 func TestValidateValue_String(t *testing.T) {
 	def := PreferenceDefinition{
 		Key:  "language",
-		Type: "string",
+		Type: StringType,
 	}
 
 	err := validateValue("en", def)
@@ -42,7 +42,7 @@ func TestValidateValue_String(t *testing.T) {
 func TestValidateValue_Boolean(t *testing.T) {
 	def := PreferenceDefinition{
 		Key:  "notifications",
-		Type: "boolean",
+		Type: BoolType,
 	}
 
 	err := validateValue(true, def)
@@ -56,20 +56,32 @@ func TestValidateValue_Boolean(t *testing.T) {
 	}
 }
 
-func TestValidateValue_Number(t *testing.T) {
+func TestValidateValue_Int(t *testing.T) {
 	def := PreferenceDefinition{
 		Key:  "volume",
-		Type: "number",
+		Type: IntType,
 	}
 
 	err := validateValue(10, def)
 	if err != nil {
-		t.Errorf("Expected valid number, got error: %v", err)
+		t.Errorf("Expected valid int, got error: %v", err)
 	}
 
-	err = validateValue(3.14, def)
+	err = validateValue("high", def)
+	if !errors.Is(err, ErrInvalidValue) {
+		t.Errorf("Expected ErrInvalidValue, got: %v", err)
+	}
+}
+
+func TestValidateValue_Float(t *testing.T) {
+	def := PreferenceDefinition{
+		Key:  "volume",
+		Type: FloatType,
+	}
+
+	err := validateValue(3.14, def)
 	if err != nil {
-		t.Errorf("Expected valid number, got error: %v", err)
+		t.Errorf("Expected valid float, got error: %v", err)
 	}
 
 	err = validateValue("high", def)
@@ -81,7 +93,7 @@ func TestValidateValue_Number(t *testing.T) {
 func TestValidateValue_JSON(t *testing.T) {
 	def := PreferenceDefinition{
 		Key:  "settings",
-		Type: "json",
+		Type: JSONType,
 	}
 
 	validJSON := map[string]interface{}{
@@ -104,7 +116,7 @@ func TestValidateValue_JSON(t *testing.T) {
 func TestValidateValue_Enum(t *testing.T) {
 	def := PreferenceDefinition{
 		Key:           "theme",
-		Type:          "enum",
+		Type:          StringType,
 		AllowedValues: []interface{}{"light", "dark", "system"},
 	}
 
@@ -121,12 +133,12 @@ func TestValidateValue_Enum(t *testing.T) {
 	// Enum with no allowed values
 	defNoAllowed := PreferenceDefinition{
 		Key:  "invalid_enum",
-		Type: "enum",
+		Type: StringType,
 	}
 
 	err = validateValue("any", defNoAllowed)
-	if !errors.Is(err, ErrInvalidValue) {
-		t.Errorf("Expected ErrInvalidValue for enum with no allowed values, got: %v", err)
+	if err != nil {
+		t.Errorf("Expected no error for string with no allowed values, got: %v", err)
 	}
 }
 

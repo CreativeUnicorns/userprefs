@@ -26,7 +26,7 @@ func main() {
 	preferences := []userprefs.PreferenceDefinition{
 		{
 			Key:          "output_format",
-			Type:         "enum",
+			Type:         userprefs.StringType,
 			DefaultValue: "gif",
 			Category:     "media",
 			AllowedValues: []interface{}{
@@ -37,13 +37,13 @@ func main() {
 		},
 		{
 			Key:          "auto_convert",
-			Type:         "boolean",
+			Type:         userprefs.BoolType,
 			DefaultValue: false,
 			Category:     "media",
 		},
 		{
 			Key:          "max_duration",
-			Type:         "number",
+			Type:         userprefs.IntType,
 			DefaultValue: 30,
 			Category:     "media",
 		},

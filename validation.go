@@ -8,11 +8,11 @@ import (
 
 // validTypes maps valid preference types to a boolean for quick lookup.
 var validTypes = map[string]bool{
-	"string":  true,
-	"boolean": true,
-	"number":  true,
-	"json":    true,
-	"enum":    true,
+	StringType: true,
+	BoolType:   true,
+	IntType:    true,
+	FloatType:  true,
+	JSONType:   true,
 }
 
 // isValidType checks if the provided type is valid.
@@ -23,29 +23,38 @@ func isValidType(t string) bool {
 // validateValue ensures that the value conforms to the preference definition.
 func validateValue(value interface{}, def PreferenceDefinition) error {
 	switch def.Type {
-	case "string":
+	case StringType:
 		if _, ok := value.(string); !ok {
 			return fmt.Errorf("%w: expected string", ErrInvalidValue)
 		}
-	case "boolean":
+	case BoolType:
 		if _, ok := value.(bool); !ok {
 			return fmt.Errorf("%w: expected boolean", ErrInvalidValue)
 		}
-	case "number":
+	case IntType:
 		switch value.(type) {
-		case int, int32, int64, float32, float64:
-			// Valid numeric types
+		case int, int32, int64:
+			// Valid integer types
 		default:
-			return fmt.Errorf("%w: expected number", ErrInvalidValue)
+			return fmt.Errorf("%w: expected integer", ErrInvalidValue)
 		}
-	case "json":
+	case FloatType:
+		switch value.(type) {
+		case float32, float64:
+			// Valid float types
+		default:
+			return fmt.Errorf("%w: expected float", ErrInvalidValue)
+		}
+	case JSONType:
 		if _, err := json.Marshal(value); err != nil {
 			return fmt.Errorf("%w: invalid JSON value", ErrInvalidValue)
 		}
-	case "enum":
-		if len(def.AllowedValues) == 0 {
-			return fmt.Errorf("%w: enum has no allowed values", ErrInvalidValue)
-		}
+	default:
+		return fmt.Errorf("%w: unsupported type %s", ErrInvalidType, def.Type)
+	}
+
+	// Check allowed values if specified
+	if len(def.AllowedValues) > 0 {
 		found := false
 		for _, allowed := range def.AllowedValues {
 			if value == allowed {
@@ -56,8 +65,7 @@ func validateValue(value interface{}, def PreferenceDefinition) error {
 		if !found {
 			return fmt.Errorf("%w: value not in allowed values", ErrInvalidValue)
 		}
-	default:
-		return fmt.Errorf("%w: unsupported type", ErrInvalidType)
 	}
+
 	return nil
 }

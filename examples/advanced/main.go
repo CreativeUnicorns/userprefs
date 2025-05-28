@@ -90,7 +90,7 @@ func main() {
 	preferences := []userprefs.PreferenceDefinition{
 		{
 			Key:      "video_settings",
-			Type:     "json",
+			Type:     userprefs.JSONType,
 			Category: "advanced",
 			DefaultValue: VideoSettings{
 				Resolution: "1080p",
@@ -100,7 +100,7 @@ func main() {
 		},
 		{
 			Key:      "notification_settings",
-			Type:     "json",
+			Type:     userprefs.JSONType,
 			Category: "notifications",
 			DefaultValue: NotificationSettings{
 				Enabled:  true,
@@ -110,7 +110,7 @@ func main() {
 		},
 		{
 			Key:          "theme",
-			Type:         "enum",
+			Type:         userprefs.StringType,
 			Category:     "appearance",
 			DefaultValue: "dark",
 			AllowedValues: []interface{}{
@@ -216,13 +216,13 @@ func demonstrateDefaultAndCacheErrorHandling(ctx context.Context) {
 	// Define preferences specifically for this demonstration
 	soundProfileDef := userprefs.PreferenceDefinition{
 		Key:          "sound_profile_demo",
-		Type:         "string",
+		Type:         userprefs.StringType,
 		Category:     "audio_demo",
 		DefaultValue: "stereo_default",
 	}
 	uiModeDef := userprefs.PreferenceDefinition{
 		Key:          "ui_mode_demo",
-		Type:         "string",
+		Type:         userprefs.StringType,
 		Category:     "appearance_demo",
 		DefaultValue: "light_default",
 	}
@@ -288,7 +288,7 @@ func demonstrateDefaultAndCacheErrorHandling(ctx context.Context) {
 	// To unequivocally show default fallback from a 'bad' state, let's use a new key that will only ever have a default.
 	neverSetPrefKey := "never_set_pref_demo"
 	neverSetPrefDef := userprefs.PreferenceDefinition{
-		Key: neverSetPrefKey, Type: "string", DefaultValue: "default_for_never_set", Category: "demo_extra",
+		Key: neverSetPrefKey, Type: userprefs.StringType, DefaultValue: "default_for_never_set", Category: "demo_extra",
 	}
 	if err := mgr.DefinePreference(neverSetPrefDef); err != nil {
 		log.Fatalf("Failed to define %s: %v", neverSetPrefKey, err)
