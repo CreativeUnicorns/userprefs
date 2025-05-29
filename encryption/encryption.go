@@ -6,6 +6,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -14,15 +15,18 @@ import (
 )
 
 const (
-	// MinKeyLength is the minimum required length for AES-256 encryption keys (32 bytes).
+	// MinKeyLength is the minimum required length for the input key material (32 bytes).
+	// The actual AES key will be derived from this using SHA-256.
 	MinKeyLength = 32
+	// AESKeyLength is the required length for AES-256 keys (32 bytes).
+	AESKeyLength = 32
 	// EnvKeyName is the environment variable name for the encryption key.
 	EnvKeyName = "USERPREFS_ENCRYPTION_KEY"
 )
 
 var (
 	// ErrInvalidKeyLength is returned when the encryption key doesn't meet minimum length requirements.
-	ErrInvalidKeyLength = errors.New("encryption key must be at least 32 bytes for AES-256")
+	ErrInvalidKeyLength = errors.New("encryption key must be at least 32 bytes")
 	// ErrKeyNotFound is returned when the encryption key environment variable is not set.
 	ErrKeyNotFound = errors.New("encryption key not found in environment variable " + EnvKeyName)
 	// ErrEncryptionFailed is returned when encryption operation fails.
@@ -39,6 +43,13 @@ type Manager struct {
 	key []byte
 }
 
+// deriveKey derives a 32-byte AES key from input key material using SHA-256.
+// This allows keys of any length >= MinKeyLength to be used safely.
+func deriveKey(keyMaterial []byte) []byte {
+	hash := sha256.Sum256(keyMaterial)
+	return hash[:]
+}
+
 // NewManager creates a new encryption manager with the key from environment variable.
 // It validates the key strength and length during initialization.
 // Returns an error if the key is missing or doesn't meet security requirements.
@@ -48,22 +59,26 @@ func NewManager() (*Manager, error) {
 		return nil, ErrKeyNotFound
 	}
 
-	key := []byte(keyStr)
-	if len(key) < MinKeyLength {
-		return nil, fmt.Errorf("%w: got %d bytes, need at least %d", ErrInvalidKeyLength, len(key), MinKeyLength)
+	keyMaterial := []byte(keyStr)
+	if len(keyMaterial) < MinKeyLength {
+		return nil, fmt.Errorf("%w: got %d bytes, need at least %d", ErrInvalidKeyLength, len(keyMaterial), MinKeyLength)
 	}
 
-	return &Manager{key: key}, nil
+	// Derive a proper 32-byte AES key from the input material
+	derivedKey := deriveKey(keyMaterial)
+	return &Manager{key: derivedKey}, nil
 }
 
 // NewManagerWithKey creates a new encryption manager with a provided key.
 // This is primarily used for testing. In production, use NewManager() with environment variables.
-func NewManagerWithKey(key []byte) (*Manager, error) {
-	if len(key) < MinKeyLength {
-		return nil, fmt.Errorf("%w: got %d bytes, need at least %d", ErrInvalidKeyLength, len(key), MinKeyLength)
+func NewManagerWithKey(keyMaterial []byte) (*Manager, error) {
+	if len(keyMaterial) < MinKeyLength {
+		return nil, fmt.Errorf("%w: got %d bytes, need at least %d", ErrInvalidKeyLength, len(keyMaterial), MinKeyLength)
 	}
 
-	return &Manager{key: key}, nil
+	// Derive a proper 32-byte AES key from the input material
+	derivedKey := deriveKey(keyMaterial)
+	return &Manager{key: derivedKey}, nil
 }
 
 // Encrypt encrypts plaintext using AES-256-GCM and returns base64-encoded ciphertext.

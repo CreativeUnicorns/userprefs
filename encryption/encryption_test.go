@@ -1,6 +1,7 @@
 package encryption
 
 import (
+	"crypto/sha256"
 	"os"
 	"strings"
 	"testing"
@@ -8,6 +9,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// derivedKeyForTest computes the expected derived key for testing purposes
+func derivedKeyForTest(keyMaterial []byte) []byte {
+	hash := sha256.Sum256(keyMaterial)
+	return hash[:]
+}
 
 func TestNewManager(t *testing.T) {
 	tests := []struct {
@@ -23,7 +30,7 @@ func TestNewManager(t *testing.T) {
 		},
 		{
 			name:        "key too short",
-			envValue:    "short-key",
+			envValue:    "short",
 			expectError: true,
 			errorType:   ErrInvalidKeyLength,
 		},
@@ -47,10 +54,12 @@ func TestNewManager(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Clean up environment
+			defer os.Unsetenv(EnvKeyName)
+
 			// Set environment variable
 			if tt.envValue != "" {
 				os.Setenv(EnvKeyName, tt.envValue)
-				defer os.Unsetenv(EnvKeyName)
 			} else {
 				os.Unsetenv(EnvKeyName)
 			}
@@ -66,7 +75,9 @@ func TestNewManager(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 				assert.NotNil(t, manager)
-				assert.Equal(t, []byte(tt.envValue), manager.key)
+				// Check that the key is the derived key, not the raw input
+				expectedKey := derivedKeyForTest([]byte(tt.envValue))
+				assert.Equal(t, expectedKey, manager.key)
 			}
 		})
 	}
@@ -116,7 +127,9 @@ func TestNewManagerWithKey(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 				assert.NotNil(t, manager)
-				assert.Equal(t, tt.key, manager.key)
+				// Check that the key is the derived key, not the raw input
+				expectedKey := derivedKeyForTest(tt.key)
+				assert.Equal(t, expectedKey, manager.key)
 			}
 		})
 	}
